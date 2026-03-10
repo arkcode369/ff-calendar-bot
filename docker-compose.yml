@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  ffbot:
+    build: .
+    container_name: ff-calendar-bot
+    restart: always
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - CHAT_ID=${CHAT_ID}
+      - TZ=Asia/Jakarta
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
