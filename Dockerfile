@@ -10,8 +10,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ffbot mai
 # Stage 2: Run (scratch = ~0MB base, minimal attack surface)
 FROM alpine:latest
 
-# tzdata for timezone support
-RUN apk --no-cache add ca-certificates tzdata
+# tzdata for timezone, procps/iproute2/coreutils for VPS monitoring, docker-cli for container stats
+RUN apk --no-cache add ca-certificates tzdata procps iproute2 coreutils docker-cli
 
 WORKDIR /app
 COPY --from=builder /app/ffbot .
