@@ -9,6 +9,9 @@ services:
       - BOT_TOKEN=${BOT_TOKEN}
       - CHAT_ID=${CHAT_ID}
       - TZ=Asia/Jakarta
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
     logging:
       driver: json-file
       options:
