@@ -65,6 +65,10 @@ type Bot struct {
 	fetchCount     int
 	fetchErrs      int
 	rateLimitUntil time.Time
+	lastEtag       string
+	lastModified   string
+	lastFetchErr   string
+	lastErrCode    int
 }
 
 // ============================================================================
@@ -176,6 +180,30 @@ func fmtDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", mins)
 }
 
+// dataStatusBanner returns a warning line if data is stale or errored.
+// Must be called with b.mu.RLock held or from a safe context.
+func (b *Bot) dataStatusBanner() string {
+	if b.lastFetchErr == "" && b.lastErrCode == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n\u26A0\uFE0F <b>Data mungkin tidak terbaru</b>\n")
+	if b.lastErrCode > 0 {
+		sb.WriteString(fmt.Sprintf("\u2514 Error HTTP %d dari:\n  <code>%s</code>\n", b.lastErrCode, FF_JSON_URL))
+	} else if b.lastFetchErr != "" {
+		sb.WriteString(fmt.Sprintf("\u2514 %s\n", b.lastFetchErr))
+	}
+	if !b.rateLimitUntil.IsZero() && time.Now().Before(b.rateLimitUntil) {
+		rem := time.Until(b.rateLimitUntil).Round(time.Second)
+		sb.WriteString(fmt.Sprintf("\u23F3 Cooldown: %v lagi\n", rem))
+	}
+	if !b.lastFetch.IsZero() {
+		age := fmtDuration(time.Since(b.lastFetch))
+		sb.WriteString(fmt.Sprintf("\U0001F4BE Data cache: %s lalu (%d events)\n", age, len(b.events)))
+	}
+	return sb.String()
+}
+
 // ============================================================================
 // BOT CORE
 // ============================================================================
@@ -270,7 +298,8 @@ func (b *Bot) fetchEvents() error {
 	cooldownUntil := b.rateLimitUntil
 	b.mu.RUnlock()
 	if time.Now().Before(cooldownUntil) {
-		log.Printf("[FETCH] Rate-limit cooldown until %s, skipping", cooldownUntil.Format("15:04:05"))
+		rem := time.Until(cooldownUntil).Round(time.Second)
+		log.Printf("[FETCH] Rate-limit cooldown %v remaining, skipping (using cached data)", rem)
 		return nil
 	}
 
@@ -289,9 +318,24 @@ func (b *Bot) fetchEvents() error {
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+
+		// Conditional fetch — skip download if data unchanged
+		b.mu.RLock()
+		if b.lastEtag != "" {
+			req.Header.Set("If-None-Match", b.lastEtag)
+		}
+		if b.lastModified != "" {
+			req.Header.Set("If-Modified-Since", b.lastModified)
+		}
+		b.mu.RUnlock()
+
 		resp, err := b.client.Do(req)
 		if err != nil {
 			lastErr = err
+			b.mu.Lock()
+			b.lastFetchErr = fmt.Sprintf("Connection error: %v", err)
+			b.lastErrCode = 0
+			b.mu.Unlock()
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)
@@ -301,46 +345,86 @@ func (b *Bot) fetchEvents() error {
 			continue
 		}
 
-		log.Printf("[FETCH] HTTP %d | %d bytes (attempt %d)", resp.StatusCode, len(data), attempt+1)
+		log.Printf("[FETCH] HTTP %d | %d bytes | URL: %s (attempt %d)", resp.StatusCode, len(data), FF_JSON_URL, attempt+1)
 
-		// Rate limited — set cooldown and stop retrying
+		// 304 Not Modified — data unchanged, no need to re-parse
+		if resp.StatusCode == 304 {
+			b.mu.Lock()
+			b.lastFetch = time.Now()
+			b.fetchCount++
+			b.lastFetchErr = ""
+			b.lastErrCode = 0
+			b.mu.Unlock()
+			log.Printf("[FETCH] 304 Not Modified — using cached %d events", len(b.events))
+			return nil
+		}
+
+		// Rate limited — set cooldown, keep old data
 		if resp.StatusCode == 429 {
 			b.mu.Lock()
 			b.rateLimitUntil = time.Now().Add(10 * time.Minute)
 			b.fetchErrs++
+			b.lastFetchErr = fmt.Sprintf("Rate limited (HTTP 429) from %s", FF_JSON_URL)
+			b.lastErrCode = 429
 			b.mu.Unlock()
-			log.Printf("[FETCH] Rate limited! Cooling down for 10 minutes")
-			return fmt.Errorf("rate limited (429), cooldown 10min")
+			log.Printf("[FETCH] Rate limited! Cooling down 10min. Cached data preserved.")
+			return fmt.Errorf("rate limited (429) from %s, cooldown 10min", FF_JSON_URL)
 		}
 
 		// Server error — retry
 		if resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("http %d", resp.StatusCode)
+			lastErr = fmt.Errorf("http %d from %s", resp.StatusCode, FF_JSON_URL)
+			b.mu.Lock()
+			b.lastFetchErr = fmt.Sprintf("Server error (HTTP %d) from %s", resp.StatusCode, FF_JSON_URL)
+			b.lastErrCode = resp.StatusCode
+			b.mu.Unlock()
 			continue
 		}
 
+		// Other non-200
 		if resp.StatusCode != 200 {
+			b.mu.Lock()
 			b.fetchErrs++
-			return fmt.Errorf("http %d", resp.StatusCode)
+			b.lastFetchErr = fmt.Sprintf("HTTP %d from %s", resp.StatusCode, FF_JSON_URL)
+			b.lastErrCode = resp.StatusCode
+			b.mu.Unlock()
+			return fmt.Errorf("http %d from %s", resp.StatusCode, FF_JSON_URL)
 		}
 
 		// Sanity check: JSON must start with '['
 		trimmed := strings.TrimSpace(string(data))
 		if len(trimmed) == 0 || trimmed[0] != '[' {
-			lastErr = fmt.Errorf("non-JSON response: %.80s", trimmed)
+			lastErr = fmt.Errorf("non-JSON response from %s: %.80s", FF_JSON_URL, trimmed)
+			b.mu.Lock()
+			b.lastFetchErr = fmt.Sprintf("Invalid response from %s (not JSON)", FF_JSON_URL)
+			b.lastErrCode = 200
+			b.mu.Unlock()
 			continue
 		}
 
 		var events []FFEvent
 		if err := json.Unmarshal(data, &events); err != nil {
+			b.mu.Lock()
 			b.fetchErrs++
-			return fmt.Errorf("json: %w", err)
+			b.lastFetchErr = fmt.Sprintf("JSON parse error from %s: %v", FF_JSON_URL, err)
+			b.lastErrCode = 200
+			b.mu.Unlock()
+			return fmt.Errorf("json parse from %s: %w", FF_JSON_URL, err)
 		}
 
+		// Success — save data + cache headers
 		b.mu.Lock()
 		b.events = events
 		b.lastFetch = time.Now()
 		b.fetchCount++
+		b.lastFetchErr = ""
+		b.lastErrCode = 0
+		if etag := resp.Header.Get("ETag"); etag != "" {
+			b.lastEtag = etag
+		}
+		if lm := resp.Header.Get("Last-Modified"); lm != "" {
+			b.lastModified = lm
+		}
 		for _, e := range events {
 			k := eventKey(e)
 			if _, ok := b.eventState[k]; !ok {
@@ -348,11 +432,15 @@ func (b *Bot) fetchEvents() error {
 			}
 		}
 		b.mu.Unlock()
-		log.Printf("[FETCH] Loaded %d events", len(events))
+		log.Printf("[FETCH] Loaded %d events (fresh data)", len(events))
 		return nil
 	}
 
+	b.mu.Lock()
 	b.fetchErrs++
+	b.lastFetchErr = fmt.Sprintf("Failed after %d retries: %v", maxRetries, lastErr)
+	b.lastErrCode = 0
+	b.mu.Unlock()
 	return fmt.Errorf("fetch failed after %d retries: %v", maxRetries, lastErr)
 }
 
@@ -490,6 +578,9 @@ func (b *Bot) buildToday() string {
 	}
 
 	sb.WriteString(fmt.Sprintf("\U0001F553 Updated: %s WIB", b.lastFetch.In(WIB).Format("15:04")))
+	if banner := b.dataStatusBanner(); banner != "" {
+		sb.WriteString("\n" + banner)
+	}
 	return sb.String()
 }
 
@@ -547,6 +638,9 @@ func (b *Bot) buildWeek() string {
 	}
 
 	sb.WriteString(fmt.Sprintf("\U0001F553 Updated: %s WIB", b.lastFetch.In(WIB).Format("15:04")))
+	if banner := b.dataStatusBanner(); banner != "" {
+		sb.WriteString("\n" + banner)
+	}
 	return sb.String()
 }
 
@@ -601,6 +695,9 @@ func (b *Bot) buildHigh() string {
 	}
 
 	sb.WriteString(fmt.Sprintf("\U0001F553 Updated: %s WIB", b.lastFetch.In(WIB).Format("15:04")))
+	if banner := b.dataStatusBanner(); banner != "" {
+		sb.WriteString("\n" + banner)
+	}
 	return sb.String()
 }
 
@@ -757,6 +854,16 @@ func (b *Bot) buildHealth() string {
 	if !b.lastFetch.IsZero() {
 		sb.WriteString(fmt.Sprintf("  \U0001F553 Last fetch: %s WIB\n", b.lastFetch.In(WIB).Format("15:04:05")))
 		sb.WriteString(fmt.Sprintf("  \u23F3 Data age: %s\n", fmtDuration(time.Since(b.lastFetch))))
+	}
+	if b.lastFetchErr != "" {
+		sb.WriteString(fmt.Sprintf("  \u26A0\uFE0F Last error: %s\n", b.lastFetchErr))
+	}
+	if !b.rateLimitUntil.IsZero() && time.Now().Before(b.rateLimitUntil) {
+		rem := time.Until(b.rateLimitUntil).Round(time.Second)
+		sb.WriteString(fmt.Sprintf("  \U0001F6AB Rate limit cooldown: %v\n", rem))
+	}
+	if b.lastEtag != "" {
+		sb.WriteString("  \U0001F4BE Cache: ETag active\n")
 	}
 
 	// Alert status
