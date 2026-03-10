@@ -10,10 +10,12 @@ services:
       - CHAT_ID=${CHAT_ID}
       - TZ=Asia/Jakarta
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /proc:/host/proc:ro
+      - ffbot-data:/app/data
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  ffbot-data:
