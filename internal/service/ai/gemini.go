@@ -85,7 +85,7 @@ func (gc *GeminiClient) Generate(ctx context.Context, prompt string) (string, er
 // GenerateWithSystem sends a prompt with a system instruction.
 func (gc *GeminiClient) GenerateWithSystem(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	// Clone model config with system instruction
-	model := gc.client.GenerativeModel("gemini-2.0-flash")
+	model := gc.client.GenerativeModel("gemini-3.1-flash-lite-preview")
 	model.SetTemperature(0.3)
 	model.SetTopP(0.8)
 	model.SetTopK(40)
