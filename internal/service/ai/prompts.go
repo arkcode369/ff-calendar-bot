@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/arkcode369/ff-calendar-bot/internal/domain"
+	"github.com/arkcode369/ff-calendar-bot/internal/ports"
 	"github.com/arkcode369/ff-calendar-bot/pkg/fmtutil"
 )
 
@@ -31,15 +32,15 @@ func BuildCOTAnalysisPrompt(analyses []domain.COTAnalysis) string {
 
 	for _, a := range analyses {
 		b.WriteString(fmt.Sprintf("--- %s (%s) | Report: %s ---\n",
-			a.ContractCode, a.Currency, a.ReportDate.Format("2006-01-02")))
+			a.Contract.Code, a.Contract.Currency, a.ReportDate.Format("2006-01-02")))
 		b.WriteString(fmt.Sprintf("Spec Net: %s (chg: %s) | L/S Ratio: %s\n",
-			fmtutil.FmtNumSigned(float64(a.SpecNetPosition), 0),
-			fmtutil.FmtNumSigned(float64(a.SpecNetChange), 0),
-			fmtutil.FmtNum(a.SpecLongShortRatio, 2)))
-		b.WriteString(fmt.Sprintf("Comm Net: %s (chg: %s) | L/S Ratio: %s\n",
-			fmtutil.FmtNumSigned(float64(a.CommNetPosition), 0),
-			fmtutil.FmtNumSigned(float64(a.CommNetChange), 0),
-			fmtutil.FmtNum(a.CommLongShortRatio, 2)))
+			fmtutil.FmtNumSigned(a.NetPosition, 0),
+			fmtutil.FmtNumSigned(a.NetChange, 0),
+			fmtutil.FmtNum(a.LongShortRatio, 2)))
+		b.WriteString(fmt.Sprintf("Comm Net: %s (momentum 4W: %s) | L/S Ratio: %s\n",
+			fmtutil.FmtNumSigned(a.NetCommercial, 0),
+			fmtutil.FmtNumSigned(a.CommMomentum4W, 0),
+			fmtutil.FmtNum(a.CommLSRatio, 2)))
 		b.WriteString(fmt.Sprintf("COT Index: Spec=%.1f Comm=%.1f\n", a.COTIndex, a.COTIndexComm))
 		b.WriteString(fmt.Sprintf("Momentum 4W: Spec=%s Comm=%s\n",
 			fmtutil.FmtNumSigned(a.SpecMomentum4W, 0),
@@ -67,7 +68,7 @@ func BuildEventImpactPrompt(event domain.FFEvent, history []domain.FFEventDetail
 	b.WriteString(fmt.Sprintf("Analyze the upcoming %s event for %s.\n\n", event.Title, event.Currency))
 	b.WriteString(fmt.Sprintf("Event: %s\n", event.Title))
 	b.WriteString(fmt.Sprintf("Currency: %s\n", event.Currency))
-	b.WriteString(fmt.Sprintf("Time: %s WIB\n", event.DateTime.Format("2006-01-02 15:04")))
+	b.WriteString(fmt.Sprintf("Time: %s WIB\n", event.Date.Format("2006-01-02 15:04")))
 	b.WriteString(fmt.Sprintf("Forecast: %s | Previous: %s\n\n", event.Forecast, event.Previous))
 
 	if len(history) > 0 {
@@ -98,8 +99,8 @@ func BuildEventImpactPrompt(event domain.FFEvent, history []domain.FFEventDetail
 func BuildConfluencePrompt(score domain.ConfluenceScore) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Interpret this multi-factor confluence analysis for %s.\n\n", score.CurrencyPair))
-	b.WriteString(fmt.Sprintf("Overall Score: %.1f/100 | Direction: %s | Confidence: %.0f%%\n\n",
-		score.TotalScore, score.Direction, score.Confidence))
+	b.WriteString(fmt.Sprintf("Overall Score: %.1f/100 | Bias: %s | Strongest: %s\n\n",
+		score.TotalScore, score.Bias, score.StrongestFactor))
 
 	b.WriteString("Factor breakdown:\n")
 	for _, f := range score.Factors {
@@ -117,7 +118,7 @@ func BuildConfluencePrompt(score domain.ConfluenceScore) string {
 }
 
 // BuildWeeklyOutlookPrompt creates a prompt for weekly market outlook.
-func BuildWeeklyOutlookPrompt(data WeeklyOutlookData) string {
+func BuildWeeklyOutlookPrompt(data ports.WeeklyData) string {
 	var b strings.Builder
 	b.WriteString("Generate a comprehensive weekly forex fundamental outlook.\n\n")
 
@@ -126,19 +127,19 @@ func BuildWeeklyOutlookPrompt(data WeeklyOutlookData) string {
 		b.WriteString("=== COT POSITIONING ===\n")
 		for _, a := range data.COTAnalyses {
 			b.WriteString(fmt.Sprintf("%s: SpecNet=%s COTIdx=%.0f CommSignal=%s\n",
-				a.Currency,
-				fmtutil.FmtNumSigned(float64(a.SpecNetPosition), 0),
+				a.Contract.Currency,
+				fmtutil.FmtNumSigned(a.NetPosition, 0),
 				a.COTIndex, a.CommercialSignal))
 		}
 		b.WriteString("\n")
 	}
 
 	// Economic calendar
-	if len(data.HighImpactEvents) > 0 {
+	if len(data.UpcomingEvents) > 0 {
 		b.WriteString("=== KEY EVENTS THIS WEEK ===\n")
-		for _, ev := range data.HighImpactEvents {
+		for _, ev := range data.UpcomingEvents {
 			b.WriteString(fmt.Sprintf("%s %s: %s (F:%s P:%s)\n",
-				ev.DateTime.Format("Mon 15:04"), ev.Currency, ev.Title,
+				ev.Date.Format("Mon 15:04"), ev.Currency, ev.Title,
 				ev.Forecast, ev.Previous))
 		}
 		b.WriteString("\n")
@@ -147,17 +148,17 @@ func BuildWeeklyOutlookPrompt(data WeeklyOutlookData) string {
 	// Surprise indices
 	if len(data.SurpriseIndices) > 0 {
 		b.WriteString("=== ECONOMIC SURPRISE ===\n")
-		for ccy, idx := range data.SurpriseIndices {
-			b.WriteString(fmt.Sprintf("%s: %s\n", ccy, fmtutil.FmtNumSigned(idx.RollingScore, 1)))
+		for _, idx := range data.SurpriseIndices {
+			b.WriteString(fmt.Sprintf("%s: %s\n", idx.Currency, fmtutil.FmtNumSigned(idx.RollingScore, 1)))
 		}
 		b.WriteString("\n")
 	}
 
 	// Currency rankings
-	if data.Rankings != nil && len(data.Rankings.Rankings) > 0 {
+	if data.CurrencyRanking != nil && len(data.CurrencyRanking.Rankings) > 0 {
 		b.WriteString("=== CURRENCY STRENGTH ===\n")
-		for _, r := range data.Rankings.Rankings {
-			b.WriteString(fmt.Sprintf("%d. %s (%.1f)\n", r.Rank, r.Code, r.CompositeScore))
+		for _, r := range data.CurrencyRanking.Rankings {
+			b.WriteString(fmt.Sprintf("%d. %s (%.1f)\n", r.Rank, r.Score.Code, r.Score.CompositeScore))
 		}
 		b.WriteString("\n")
 	}
@@ -183,8 +184,8 @@ func BuildCrossMarketPrompt(cotData map[string]*domain.COTAnalysis) string {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("%s (%s): SpecNet=%s COTIdx=%.0f Sentiment=%.0f Crowd=%.0f\n",
-			code, a.Currency,
-			fmtutil.FmtNumSigned(float64(a.SpecNetPosition), 0),
+			code, a.Contract.Currency,
+			fmtutil.FmtNumSigned(a.NetPosition, 0),
 			a.COTIndex, a.SentimentScore, a.CrowdingIndex))
 	}
 
@@ -195,13 +196,4 @@ func BuildCrossMarketPrompt(cotData map[string]*domain.COTAnalysis) string {
 	b.WriteString("4. Any unusual cross-market divergences\n")
 
 	return b.String()
-}
-
-// WeeklyOutlookData bundles all data needed for weekly outlook.
-type WeeklyOutlookData struct {
-	COTAnalyses      []domain.COTAnalysis
-	HighImpactEvents []domain.FFEvent
-	SurpriseIndices  map[string]*domain.SurpriseIndex
-	Rankings         *domain.CurrencyRanking
-	Confluences      []domain.ConfluenceScore
 }
