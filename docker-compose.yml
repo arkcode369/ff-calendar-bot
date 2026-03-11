@@ -1,21 +1,63 @@
-version: '3.8'
+# ===========================================================================
+# FF Calendar Bot v2 — Docker Compose
+# ===========================================================================
+#
+# Usage:
+#   cp .env.example .env    # Configure your tokens
+#   docker compose up -d    # Start in background
+#   docker compose logs -f  # Follow logs
+#   docker compose down     # Stop gracefully
+#
+# Data persists in the 'botdata' volume across restarts.
+# ===========================================================================
+
+version: "3.8"
 
 services:
-  ffbot:
-    build: .
+  ff-calendar-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: ff-calendar-bot
-    restart: always
+    restart: unless-stopped
+
+    # Environment variables
+    env_file:
+      - .env
+
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - CHAT_ID=${CHAT_ID}
       - TZ=Asia/Jakarta
+      - DATA_DIR=/app/data
+
+    # Persistent storage for BadgerDB
     volumes:
-      - ffbot-data:/app/data
+      - botdata:/app/data
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 128M
+          cpus: "0.25"
+
+    # Logging
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
 
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "ff-calendar-bot"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
 volumes:
-  ffbot-data:
+  botdata:
+    driver: local
