@@ -287,12 +287,12 @@ func (f *Formatter) FormatCOTOverview(analyses []domain.COTAnalysis) string {
 			idxLabel = "Bearish"
 		}
 
-		b.WriteString(fmt.Sprintf("<b>%s</b> %s\n", a.ContractName, bias))
+		b.WriteString(fmt.Sprintf("<b>%s</b> %s\n", a.Contract.Name, bias))
 		b.WriteString(fmt.Sprintf("<code>  Net: %s | Idx: %.0f%% (%s)</code>\n",
-			fmtutil.FormatInt(int(a.NetPosition)), a.COTIndex, idxLabel))
+			fmtutil.FmtNum(a.NetPosition, 0), a.COTIndex, idxLabel))
 		b.WriteString(fmt.Sprintf("<code>  Chg: %s | Mom: %s</code>\n\n",
-			fmtutil.FormatSignedInt(int(a.NetChange)),
-			f.momentumLabel(a.Momentum)))
+			fmtutil.FmtNumSigned(a.NetChange, 0),
+			f.momentumLabel(a.MomentumDir)))
 	}
 
 	b.WriteString("<i>Tap a currency for detailed breakdown</i>")
@@ -303,14 +303,14 @@ func (f *Formatter) FormatCOTOverview(analyses []domain.COTAnalysis) string {
 func (f *Formatter) FormatCOTDetail(a domain.COTAnalysis) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("<b>COT Analysis: %s</b>\n", a.ContractName))
+	b.WriteString(fmt.Sprintf("<b>COT Analysis: %s</b>\n", a.Contract.Name))
 	b.WriteString(fmt.Sprintf("<i>Report: %s</i>\n\n", a.ReportDate.Format("Jan 2, 2006")))
 
 	// Positioning
 	b.WriteString("<b>Positioning:</b>\n")
-	b.WriteString(fmt.Sprintf("<code>  Net Position:   %s</code>\n", fmtutil.FormatInt(int(a.NetPosition))))
-	b.WriteString(fmt.Sprintf("<code>  Net Change:     %s</code>\n", fmtutil.FormatSignedInt(int(a.NetChange))))
-	b.WriteString(fmt.Sprintf("<code>  Long/Short:     %.1f%%/%.1f%%</code>\n", a.LongPct, a.ShortPct))
+	b.WriteString(fmt.Sprintf("<code>  Net Position:   %s</code>\n", fmtutil.FmtNum(a.NetPosition, 0)))
+	b.WriteString(fmt.Sprintf("<code>  Net Change:     %s</code>\n", fmtutil.FmtNumSigned(a.NetChange, 0)))
+	b.WriteString(fmt.Sprintf("<code>  L/S Ratio:      %.2f</code>\n", a.LongShortRatio))
 
 	// COT Index
 	b.WriteString(fmt.Sprintf("\n<b>COT Index:</b>\n"))
@@ -319,8 +319,8 @@ func (f *Formatter) FormatCOTDetail(a domain.COTAnalysis) string {
 
 	// Momentum
 	b.WriteString(fmt.Sprintf("\n<b>Momentum:</b>\n"))
-	b.WriteString(fmt.Sprintf("<code>  1-Week:         %s</code>\n", fmtutil.FormatSignedInt(int(a.NetChange))))
-	b.WriteString(fmt.Sprintf("<code>  Trend:          %s</code>\n", f.momentumLabel(a.Momentum)))
+	b.WriteString(fmt.Sprintf("<code>  1-Week:         %s</code>\n", fmtutil.FmtNumSigned(a.NetChange, 0)))
+	b.WriteString(fmt.Sprintf("<code>  Trend:          %s</code>\n", f.momentumLabel(a.MomentumDir)))
 
 	// Sentiment
 	b.WriteString(fmt.Sprintf("\n<b>Sentiment Score:</b>\n"))
@@ -342,24 +342,19 @@ func (f *Formatter) FormatConfluenceOverview(scores []domain.ConfluenceScore) st
 	b.WriteString("<i>Multi-factor bias analysis</i>\n\n")
 
 	for _, s := range scores {
-		biasLabel := "NEUTRAL"
-		if s.TotalScore > 0.3 {
-			biasLabel = "BULLISH"
-		} else if s.TotalScore < -0.3 {
-			biasLabel = "BEARISH"
+		biasLabel := string(s.Bias)
+
+		agreementLabel := "Low"
+		if s.AgreementPct >= 0.7 {
+			agreementLabel = "High"
+		} else if s.AgreementPct >= 0.4 {
+			agreementLabel = "Medium"
 		}
 
-		convictionLabel := "Low"
-		if s.Conviction >= 0.7 {
-			convictionLabel = "High"
-		} else if s.Conviction >= 0.4 {
-			convictionLabel = "Medium"
-		}
-
-		b.WriteString(fmt.Sprintf("<b>%s</b> %s (Conv: %s)\n",
-			s.Pair, biasLabel, convictionLabel))
-		b.WriteString(fmt.Sprintf("<code>  Score: %+.2f | Factors: %d/6</code>\n\n",
-			s.TotalScore, s.FactorCount))
+		b.WriteString(fmt.Sprintf("<b>%s</b> %s (Agr: %s)\n",
+			s.CurrencyPair, biasLabel, agreementLabel))
+		b.WriteString(fmt.Sprintf("<code>  Score: %.1f/100 | Aligned: %d/6</code>\n\n",
+			s.TotalScore, s.FactorsAligned))
 	}
 
 	b.WriteString("<i>Tap a pair for factor breakdown</i>")
@@ -370,34 +365,29 @@ func (f *Formatter) FormatConfluenceOverview(scores []domain.ConfluenceScore) st
 func (f *Formatter) FormatConfluenceDetail(s domain.ConfluenceScore) string {
 	var b strings.Builder
 
-	biasLabel := "NEUTRAL"
-	if s.TotalScore > 0.3 {
-		biasLabel = "BULLISH"
-	} else if s.TotalScore < -0.3 {
-		biasLabel = "BEARISH"
-	}
+	biasLabel := string(s.Bias)
 
-	b.WriteString(fmt.Sprintf("<b>Confluence: %s</b> %s\n", s.Pair, biasLabel))
+	b.WriteString(fmt.Sprintf("<b>Confluence: %s</b> %s\n", s.CurrencyPair, biasLabel))
 	b.WriteString(fmt.Sprintf("<i>Updated: %s WIB</i>\n\n",
-		s.CalculatedAt.Format("Jan 2, 15:04")))
+		s.Timestamp.Format("Jan 2, 15:04")))
 
-	b.WriteString(fmt.Sprintf("<code>Total Score:    %+.2f</code>\n", s.TotalScore))
-	b.WriteString(fmt.Sprintf("<code>Conviction:     %.0f%%</code>\n\n", s.Conviction*100))
+	b.WriteString(fmt.Sprintf("<code>Total Score:    %.1f/100</code>\n", s.TotalScore))
+	b.WriteString(fmt.Sprintf("<code>Agreement:      %.0f%%</code>\n\n", s.AgreementPct*100))
 
 	b.WriteString("<b>Factor Breakdown:</b>\n")
 	for _, factor := range s.Factors {
 		alignIcon := "+"
-		if factor.Score < 0 {
+		if factor.RawScore < 45 {
 			alignIcon = "-"
-		} else if factor.Score == 0 {
+		} else if factor.RawScore >= 45 && factor.RawScore <= 55 {
 			alignIcon = "="
 		}
-		b.WriteString(fmt.Sprintf("<code>  [%s] %-14s %+.2f (w:%.1f)</code>\n",
-			alignIcon, factor.Name, factor.Score, factor.Weight))
+		b.WriteString(fmt.Sprintf("<code>  [%s] %-14s %.1f (w:%.2f)</code>\n",
+			alignIcon, factor.Name, factor.RawScore, factor.Weight))
 	}
 
-	if s.Narrative != "" {
-		b.WriteString(fmt.Sprintf("\n<i>%s</i>", s.Narrative))
+	if s.AINarrative != "" {
+		b.WriteString(fmt.Sprintf("\n<i>%s</i>", s.AINarrative))
 	}
 
 	return b.String()
@@ -416,18 +406,18 @@ func (f *Formatter) FormatSurpriseIndices(indices []domain.SurpriseIndex) string
 
 	for _, idx := range indices {
 		trendIcon := "="
-		if idx.Trend > 0.1 {
+		if idx.RollingScore > 0.5 {
 			trendIcon = "+"
-		} else if idx.Trend < -0.1 {
+		} else if idx.RollingScore < -0.5 {
 			trendIcon = "-"
 		}
 
 		b.WriteString(fmt.Sprintf("<b>%s</b> [%s]\n", idx.Currency, trendIcon))
-		b.WriteString(fmt.Sprintf("<code>  Index:   %+.2f</code>\n", idx.Value))
-		b.WriteString(fmt.Sprintf("<code>  Trend:   %+.2f (%s)</code>\n",
-			idx.Trend, f.trendLabel(idx.Trend)))
+		b.WriteString(fmt.Sprintf("<code>  Index:   %+.2f</code>\n", idx.RollingScore))
+		b.WriteString(fmt.Sprintf("<code>  Dir:     %s (Streak: %d)</code>\n",
+			idx.Direction, idx.Streak))
 		b.WriteString(fmt.Sprintf("<code>  Events:  %d in window</code>\n\n",
-			idx.EventCount))
+			idx.TotalEvents))
 	}
 
 	return b.String()
@@ -443,7 +433,7 @@ func (f *Formatter) FormatCurrencyRanking(ranking domain.CurrencyRanking) string
 
 	b.WriteString("<b>Currency Strength Ranking</b>\n")
 	b.WriteString(fmt.Sprintf("<i>Updated: %s WIB</i>\n\n",
-		ranking.CalculatedAt.Format("Jan 2, 15:04")))
+		ranking.Timestamp.Format("Jan 2, 15:04")))
 
 	// Table header
 	b.WriteString("<pre>")
@@ -453,16 +443,16 @@ func (f *Formatter) FormatCurrencyRanking(ranking domain.CurrencyRanking) string
 
 	for i, entry := range ranking.Rankings {
 		biasLabel := "--"
-		if entry.CompositeScore > 0.3 {
+		if entry.Score.CompositeScore > 0.3 {
 			biasLabel = "BUL"
-		} else if entry.CompositeScore < -0.3 {
+		} else if entry.Score.CompositeScore < -0.3 {
 			biasLabel = "BER"
 		} else {
 			biasLabel = "NEU"
 		}
 
 		strength := "Med"
-		abs := math.Abs(entry.CompositeScore)
+		abs := math.Abs(entry.Score.CompositeScore)
 		if abs >= 0.7 {
 			strength = "Str"
 		} else if abs < 0.3 {
@@ -470,7 +460,7 @@ func (f *Formatter) FormatCurrencyRanking(ranking domain.CurrencyRanking) string
 		}
 
 		b.WriteString(fmt.Sprintf("%-4d %-6s %+.2f  %-5s %-5s\n",
-			i+1, entry.Currency, entry.CompositeScore, biasLabel, strength))
+			i+1, string(entry.Score.Code), entry.Score.CompositeScore, biasLabel, strength))
 	}
 
 	b.WriteString("</pre>")
@@ -480,7 +470,7 @@ func (f *Formatter) FormatCurrencyRanking(ranking domain.CurrencyRanking) string
 		strongest := ranking.Rankings[0]
 		weakest := ranking.Rankings[len(ranking.Rankings)-1]
 		b.WriteString(fmt.Sprintf("\n<b>Top Pair:</b> Long %s / Short %s",
-			strongest.Currency, weakest.Currency))
+			string(strongest.Score.Code), string(weakest.Score.Code)))
 	}
 
 	return b.String()
@@ -496,23 +486,23 @@ func (f *Formatter) FormatVolatilityForecast(forecast domain.VolatilityForecast)
 
 	b.WriteString("<b>Volatility Forecast</b>\n")
 	b.WriteString(fmt.Sprintf("<i>Updated: %s WIB</i>\n\n",
-		forecast.CalculatedAt.Format("Jan 2, 15:04")))
+		forecast.Timestamp.Format("Jan 2, 15:04")))
 
-	for _, entry := range forecast.Entries {
+	for _, entry := range forecast.Predictions {
 		volLabel := "Normal"
-		if entry.PredictedPips > entry.HistoricalAvg*1.5 {
+		if entry.ExpectedPipMove > entry.HistoricalAvgMove*1.5 {
 			volLabel = "HIGH"
-		} else if entry.PredictedPips > entry.HistoricalAvg {
+		} else if entry.ExpectedPipMove > entry.HistoricalAvgMove {
 			volLabel = "Elevated"
-		} else if entry.PredictedPips < entry.HistoricalAvg*0.5 {
+		} else if entry.ExpectedPipMove < entry.HistoricalAvgMove*0.5 {
 			volLabel = "Low"
 		}
 
 		b.WriteString(fmt.Sprintf("<b>%s</b> %s\n", entry.EventName, volLabel))
 		b.WriteString(fmt.Sprintf("<code>  Pair:      %s</code>\n", entry.Currency))
-		b.WriteString(fmt.Sprintf("<code>  Predicted: %.0f pips</code>\n", entry.PredictedPips))
-		b.WriteString(fmt.Sprintf("<code>  Hist Avg:  %.0f pips</code>\n", entry.HistoricalAvg))
-		b.WriteString(fmt.Sprintf("<code>  Conf:      %.0f%%</code>\n\n", entry.Confidence*100))
+		b.WriteString(fmt.Sprintf("<code>  Predicted: %.0f pips</code>\n", entry.ExpectedPipMove))
+		b.WriteString(fmt.Sprintf("<code>  Hist Avg:  %.0f pips</code>\n", entry.HistoricalAvgMove))
+		b.WriteString(fmt.Sprintf("<code>  Conf:      %s</code>\n\n", entry.Confidence))
 	}
 
 	return b.String()
@@ -603,19 +593,21 @@ func (f *Formatter) formatProgressBar(pct float64, width int) string {
 	return fmt.Sprintf("<code>  [%s] %.0f%%%s</code>\n", bar, pct, label)
 }
 
-// momentumLabel converts momentum float to readable label.
-func (f *Formatter) momentumLabel(m float64) string {
-	switch {
-	case m >= 0.5:
+// momentumLabel converts MomentumDirection to readable label.
+func (f *Formatter) momentumLabel(m domain.MomentumDirection) string {
+	switch m {
+	case "STRONG_UP":
 		return "Strong Bullish"
-	case m >= 0.2:
+	case "UP":
 		return "Bullish"
-	case m > -0.2:
+	case "FLAT":
 		return "Neutral"
-	case m > -0.5:
+	case "DOWN":
 		return "Bearish"
-	default:
+	case "STRONG_DOWN":
 		return "Strong Bearish"
+	default:
+		return string(m)
 	}
 }
 
