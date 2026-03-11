@@ -27,7 +27,7 @@ func NewGeminiClient(ctx context.Context, apiKey string) (*GeminiClient, error) 
 		return nil, fmt.Errorf("create gemini client: %w", err)
 	}
 
-	model := client.GenerativeModel("gemini-2.0-flash")
+	model := client.GenerativeModel("gemini-3.1-flash-lite-preview")
 
 	// Configure for financial analysis
 	model.SetTemperature(0.3) // low creativity, high precision
