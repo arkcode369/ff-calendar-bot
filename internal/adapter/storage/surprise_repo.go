@@ -181,6 +181,47 @@ func (r *SurpriseRepo) GetSurpriseIndex(_ context.Context, currency string) (*do
 	return idx, nil
 }
 
+// GetAllSurpriseIndices retrieves latest indices for all currencies.
+func (r *SurpriseRepo) GetAllSurpriseIndices(_ context.Context) ([]domain.SurpriseIndex, error) {
+	latestMap := make(map[string]*domain.SurpriseIndex)
+	idxPrefix := []byte("surpidx:")
+
+	err := r.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = idxPrefix
+		opts.PrefetchValues = true
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(idxPrefix); it.ValidForPrefix(idxPrefix); it.Next() {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				var idx domain.SurpriseIndex
+				if err := json.Unmarshal(val, &idx); err != nil {
+					return err
+				}
+				// Keys are sorted, so last per currency wins (latest date)
+				latestMap[idx.Currency] = &idx
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("read surprise index: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get all surprise indices: %w", err)
+	}
+
+	var result []domain.SurpriseIndex
+	for _, idx := range latestMap {
+		result = append(result, *idx)
+	}
+	return result, nil
+}
+
 // SaveConfluence stores a confluence score snapshot.
 func (r *SurpriseRepo) SaveConfluence(_ context.Context, score domain.ConfluenceScore) error {
 	data, err := json.Marshal(&score)
