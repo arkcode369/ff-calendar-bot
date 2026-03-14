@@ -199,13 +199,15 @@ const (
 // EventRevision records when a "Previous" value gets revised.
 // Revision momentum is a leading indicator for economic trends.
 type EventRevision struct {
+	EventID       string            `json:"event_id,omitempty"`      // Links to FFEvent.ID
 	EventName     string            `json:"event_name"`
 	Currency      string            `json:"currency"`
-	RevisionDate  time.Time         `json:"revision_date"`  // When the revision was detected
-	OriginalValue string            `json:"original_value"` // Original "Previous" value
-	RevisedValue  string            `json:"revised_value"`  // New revised value
-	Direction     RevisionDirection `json:"direction"`       // UP, DOWN, or FLAT
-	Magnitude     float64           `json:"magnitude"`       // Absolute change in numeric terms
+	Field         string            `json:"field,omitempty"`         // "actual", "previous", "forecast", "status"
+	RevisionDate  time.Time         `json:"revision_date"`           // When the revision was detected
+	OriginalValue string            `json:"original_value"`          // Original "Previous" value
+	RevisedValue  string            `json:"revised_value"`           // New revised value
+	Direction     RevisionDirection `json:"direction"`               // UP, DOWN, or FLAT
+	Magnitude     float64           `json:"magnitude"`               // Absolute change in numeric terms
 }
 
 // ---------------------------------------------------------------------------
@@ -249,4 +251,16 @@ func DefaultPrefs() UserPrefs {
 		AIReportsEnabled: true,
 		CurrencyFilter:  nil, // nil = all currencies
 	}
+}
+
+// ---------------------------------------------------------------------------
+// AlertConfig — Alert subscription configuration
+// ---------------------------------------------------------------------------
+
+// AlertConfig defines an alert subscription for a chat.
+type AlertConfig struct {
+	ChatID    int64       `json:"chat_id"`
+	MinImpact ImpactLevel `json:"min_impact"` // Minimum impact level to alert
+	Minutes   []int       `json:"minutes"`    // Minutes before event to alert
+	Enabled   bool        `json:"enabled"`
 }

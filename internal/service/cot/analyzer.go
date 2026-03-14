@@ -99,12 +99,9 @@ func (a *Analyzer) computeMetrics(current domain.COTRecord, history []domain.COT
 	analysis.NetSmallSpec = current.SmallLong - current.SmallShort    // FIX: was SmallNetPosition
 
 	// 2. Net change (week-over-week)
-	// FIX: field names are SpecLongChange/SpecShortChange, NOT SpecLongChg/SpecShortChg
-	analysis.NetChange = current.SpecLongChange - current.SpecShortChange // FIX: was SpecNetChange
-	// CommNetChange and SmallNetChange don't exist in domain.COTAnalysis
-	// We compute them locally if needed but don't store
-	commNetChange := current.CommLongChange - current.CommShortChange
-	_ = commNetChange // used later in divergence detection
+	analysis.NetChange = current.SpecLongChange - current.SpecShortChange
+	analysis.CommNetChange = current.CommLongChange - current.CommShortChange
+	commNetChange := analysis.CommNetChange
 	smallNetChange := current.SmallLongChange - current.SmallShortChange
 	_ = smallNetChange
 

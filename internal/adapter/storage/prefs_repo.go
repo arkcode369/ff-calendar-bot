@@ -191,12 +191,86 @@ func (r *PrefsRepo) GetAllActiveAlerts(_ context.Context) ([]domain.AlertConfig,
 	return alerts, nil
 }
 
+// Get retrieves preferences for a user by ID. Returns defaults if not found.
+func (r *PrefsRepo) Get(_ context.Context, userID int64) (domain.UserPrefs, error) {
+	var prefs domain.UserPrefs
+
+	key := prefsKey(userID)
+	err := r.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(key)
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &prefs)
+		})
+	})
+	if err == badger.ErrKeyNotFound {
+		return domain.DefaultPrefs(), nil
+	}
+	if err != nil {
+		return domain.DefaultPrefs(), fmt.Errorf("get prefs %d: %w", userID, err)
+	}
+	return prefs, nil
+}
+
+// Set persists preferences for a user.
+func (r *PrefsRepo) Set(_ context.Context, userID int64, prefs domain.UserPrefs) error {
+	data, err := json.Marshal(&prefs)
+	if err != nil {
+		return fmt.Errorf("marshal prefs: %w", err)
+	}
+	key := prefsKey(userID)
+	return r.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(key, data)
+	})
+}
+
+// GetAllActive retrieves all users that have alerts enabled.
+func (r *PrefsRepo) GetAllActive(_ context.Context) (map[int64]domain.UserPrefs, error) {
+	result := make(map[int64]domain.UserPrefs)
+	prefix := []byte("prefs:")
+
+	err := r.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		opts.PrefetchValues = true
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			var userID int64
+			key := string(item.Key())
+			if _, err := fmt.Sscanf(key, "prefs:%d", &userID); err != nil {
+				continue
+			}
+			err := item.Value(func(val []byte) error {
+				var prefs domain.UserPrefs
+				if err := json.Unmarshal(val, &prefs); err != nil {
+					return err
+				}
+				if prefs.AlertsEnabled {
+					result[userID] = prefs
+				}
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("read prefs: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get all active: %w", err)
+	}
+	return result, nil
+}
+
 // compile-time interface check
 var _ interface {
-	GetPrefs(context.Context, int64) (*domain.UserPrefs, error)
-	SavePrefs(context.Context, domain.UserPrefs) error
-	GetAlerts(context.Context, int64) ([]domain.AlertConfig, error)
-	SaveAlert(context.Context, domain.AlertConfig) error
-	DeleteAlert(context.Context, int64, string) error
-	GetAllActiveAlerts(context.Context) ([]domain.AlertConfig, error)
+	Get(context.Context, int64) (domain.UserPrefs, error)
+	Set(context.Context, int64, domain.UserPrefs) error
+	GetAllActive(context.Context) (map[int64]domain.UserPrefs, error)
 } = (*PrefsRepo)(nil)

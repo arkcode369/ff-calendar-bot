@@ -155,7 +155,7 @@ func (s *Service) FetchAndStoreHistory(ctx context.Context, events []domain.FFEv
 			continue
 		}
 
-		if err := s.eventRepo.SaveHistory(ctx, ev.Title, ev.Currency, history); err != nil {
+		if err := s.eventRepo.SaveEventDetails(ctx, history); err != nil {
 			log.Printf("[calendar] warn: save history for %s: %v", ev.Title, err)
 		}
 
@@ -181,7 +181,7 @@ func buildEventMap(events []domain.FFEvent) map[string]*domain.FFEvent {
 }
 
 func eventKey(ev *domain.FFEvent) string {
-	return fmt.Sprintf("%s|%s|%s", ev.DateTime.Format(time.RFC3339), ev.Currency, ev.Title)
+	return fmt.Sprintf("%s|%s|%s", ev.Date.Format(time.RFC3339), ev.Currency, ev.Title)
 }
 
 // detectRevisions compares old vs new event data for revisions.
@@ -245,7 +245,7 @@ func detectRevisions(old, new *domain.FFEvent, now time.Time) []domain.EventRevi
 }
 
 // classifyRevisionDirection determines if a revision is upward/downward.
-func classifyRevisionDirection(original, revised string) string {
+func classifyRevisionDirection(original, revised string) domain.RevisionDirection {
 	o := strings.TrimRight(strings.TrimRight(original, "%"), "KkMmBb")
 	r := strings.TrimRight(strings.TrimRight(revised, "%"), "KkMmBb")
 
@@ -253,11 +253,11 @@ func classifyRevisionDirection(original, revised string) string {
 	rv := parseFloat(r)
 
 	if rv > ov {
-		return "upward"
+		return domain.RevisionUp
 	} else if rv < ov {
-		return "downward"
+		return domain.RevisionDown
 	}
-	return "unchanged"
+	return domain.RevisionFlat
 }
 
 func parseFloat(s string) float64 {

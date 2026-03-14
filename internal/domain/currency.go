@@ -41,6 +41,7 @@ type CurrencyScore struct {
 	GDPScore           float64 `json:"gdp_score"`            // GDP growth momentum (20%)
 	EmploymentScore    float64 `json:"employment_score"`     // Jobs data composite (20%)
 	COTScore           float64 `json:"cot_score"`            // Speculator positioning via COT (15%)
+	SurpriseScore      float64 `json:"surprise_score"`       // Economic surprise index (15%)
 
 	// Composite
 	CompositeScore float64 `json:"composite_score"` // Weighted average (0-100)
@@ -162,6 +163,10 @@ type PairAnalysis struct {
 	GDPDiff        float64 `json:"gdp_diff"`        // GDP score diff
 	EmploymentDiff float64 `json:"employment_diff"` // Employment score diff
 	COTDiff        float64 `json:"cot_diff"`        // COT score diff
+
+	// Full score breakdowns for display
+	BaseScore  CurrencyScore `json:"base_score"`
+	QuoteScore CurrencyScore `json:"quote_score"`
 }
 
 // IsActionable returns true if the differential is large enough to trade.

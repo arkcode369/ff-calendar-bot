@@ -40,12 +40,11 @@ func (ic *IndexCalculator) ComputeMultiTimeframe(history []domain.COTRecord) *Mu
 	}
 
 	specNets := extractNetsFloat(history, func(r domain.COTRecord) float64 {
-		return float64(r.SpecLong - r.SpecShort)
+		return r.SpecLong - r.SpecShort
 	})
 
 	mtf := &MultiTimeframeIndex{
 		ContractCode: history[0].ContractCode,
-		Currency:     history[0].Currency,
 	}
 
 	// 13-week index
@@ -103,7 +102,7 @@ func (ic *IndexCalculator) ComputeROC(history []domain.COTRecord) *IndexRateOfCh
 
 	// Compute weekly COT indices to get ROC
 	specNets := extractNetsFloat(history, func(r domain.COTRecord) float64 {
-		return float64(r.SpecLong - r.SpecShort)
+		return r.SpecLong - r.SpecShort
 	})
 
 	// Calculate rolling indices
@@ -154,8 +153,8 @@ type CompositeScore struct {
 // ComputeComposite calculates a composite positioning score.
 func (ic *IndexCalculator) ComputeComposite(analysis domain.COTAnalysis) CompositeScore {
 	cs := CompositeScore{
-		ContractCode: analysis.ContractCode,
-		Currency:     analysis.Currency,
+		ContractCode: analysis.Contract.Code,
+		Currency:     analysis.Contract.Currency,
 		Components:   make(map[string]float64),
 	}
 
@@ -196,9 +195,9 @@ func FormatMultiTimeframe(mtf *MultiTimeframeIndex) string {
 
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("%s COT Index (Multi-TF):\n", mtf.Currency))
-	b.WriteString(fmt.Sprintf("  13W: %s %s\n", fmtutil.FmtNum(mtf.Index13W, 1), fmtutil.COTIndexBar(mtf.Index13W)))
-	b.WriteString(fmt.Sprintf("  26W: %s %s\n", fmtutil.FmtNum(mtf.Index26W, 1), fmtutil.COTIndexBar(mtf.Index26W)))
-	b.WriteString(fmt.Sprintf("  52W: %s %s\n", fmtutil.FmtNum(mtf.Index52W, 1), fmtutil.COTIndexBar(mtf.Index52W)))
+	b.WriteString(fmt.Sprintf("  13W: %s %s\n", fmtutil.FmtNum(mtf.Index13W, 1), fmtutil.COTIndexBar(mtf.Index13W, 10)))
+	b.WriteString(fmt.Sprintf("  26W: %s %s\n", fmtutil.FmtNum(mtf.Index26W, 1), fmtutil.COTIndexBar(mtf.Index26W, 10)))
+	b.WriteString(fmt.Sprintf("  52W: %s %s\n", fmtutil.FmtNum(mtf.Index52W, 1), fmtutil.COTIndexBar(mtf.Index52W, 10)))
 	b.WriteString(fmt.Sprintf("  Avg: %s | Trend: %s", fmtutil.FmtNum(mtf.Average, 1), mtf.Trend))
 
 	return b.String()
@@ -251,4 +250,12 @@ func classifyROCSignal(roc4w, acceleration float64) string {
 
 func absFloat(v float64) float64 {
 	return math.Abs(v)
+}
+
+func extractNetsFloat(history []domain.COTRecord, fn func(domain.COTRecord) float64) []float64 {
+	out := make([]float64, len(history))
+	for i, r := range history {
+		out[i] = fn(r)
+	}
+	return out
 }

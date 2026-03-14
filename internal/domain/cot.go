@@ -88,6 +88,16 @@ func (r *COTRecord) NetSmallSpec() float64 {
 	return r.SmallLong - r.SmallShort
 }
 
+// CurrencyToContract maps a currency code to the CFTC contract code used in COT data.
+func CurrencyToContract(currency string) string {
+	for _, c := range DefaultCOTContracts {
+		if c.Currency == currency {
+			return c.Code
+		}
+	}
+	return ""
+}
+
 // ---------------------------------------------------------------------------
 // Momentum Direction
 // ---------------------------------------------------------------------------
@@ -128,7 +138,8 @@ type COTAnalysis struct {
 
 	// --- A. Core Positioning ---
 	NetPosition     float64 `json:"net_position"`      // Speculator net (primary signal)
-	NetChange       float64 `json:"net_change"`        // Week-over-week change
+	NetChange       float64 `json:"net_change"`        // Week-over-week change in spec net
+	CommNetChange   float64 `json:"comm_net_change"`   // Week-over-week change in commercial net
 	NetCommercial   float64 `json:"net_commercial"`    // Commercial net position
 	NetSmallSpec    float64 `json:"net_small_spec"`    // Small speculator net
 	LongShortRatio  float64 `json:"long_short_ratio"`  // Spec Long / Spec Short

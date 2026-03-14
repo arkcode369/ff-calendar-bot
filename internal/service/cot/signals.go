@@ -49,7 +49,7 @@ func (sd *SignalDetector) DetectAll(analyses []domain.COTAnalysis, historyMap ma
 	var signals []Signal
 
 	for _, a := range analyses {
-		history := historyMap[a.ContractCode]
+		history := historyMap[a.Contract.Code]
 
 		// Run each detector
 		if s := sd.detectSmartMoney(a, history); s != nil {
@@ -82,7 +82,7 @@ func (sd *SignalDetector) DetectAll(analyses []domain.COTAnalysis, historyMap ma
 // tend to be right at extremes.
 func (sd *SignalDetector) detectSmartMoney(a domain.COTAnalysis, history []domain.COTRecord) *Signal {
 	// Need significant commercial position change
-	commChangeAbs := math.Abs(float64(a.CommNetChange))
+	commChangeAbs := math.Abs(a.CommNetChange)
 	if commChangeAbs < 5000 {
 		return nil
 	}
@@ -107,14 +107,14 @@ func (sd *SignalDetector) detectSmartMoney(a domain.COTAnalysis, history []domai
 		confidence := mathutil.Clamp(commChangeAbs/200, 30, 95)
 
 		factors := []string{
-			fmt.Sprintf("Commercial net change: %s", fmtutil.FmtNumSigned(float64(a.CommNetChange), 0)),
+			fmt.Sprintf("Commercial net change: %s", fmtutil.FmtNumSigned(a.CommNetChange, 0)),
 			fmt.Sprintf("Commercial COT Index: %.1f", a.COTIndexComm),
 			fmt.Sprintf("Commercial signal: %s", a.CommercialSignal),
 		}
 
 		return &Signal{
-			ContractCode: a.ContractCode,
-			Currency:     a.Currency,
+			ContractCode: a.Contract.Code,
+			Currency:     a.Contract.Currency,
 			Type:         SignalSmartMoney,
 			Direction:    direction,
 			Strength:     strength,
@@ -135,7 +135,7 @@ func (sd *SignalDetector) detectExtreme(a domain.COTAnalysis) *Signal {
 	}
 
 	// Additional confirmation from Z-Score
-	hasZConfirm := math.Abs(a.SpecZScore) > 1.5
+	hasZConfirm := math.Abs(a.WillcoIndex-50) > 30
 
 	direction := "BULLISH"
 	if a.COTIndex >= 90 {
@@ -157,13 +157,13 @@ func (sd *SignalDetector) detectExtreme(a domain.COTAnalysis) *Signal {
 
 	factors := []string{
 		fmt.Sprintf("Speculator COT Index: %.1f (extreme)", a.COTIndex),
-		fmt.Sprintf("Z-Score: %.2f", a.SpecZScore),
-		fmt.Sprintf("Percentile: %.0f%%", a.SpecPercentile),
+		fmt.Sprintf("Willco Index: %.2f", a.WillcoIndex),
+		fmt.Sprintf("Percentile: %.0f%%", a.COTIndex),
 	}
 
 	return &Signal{
-		ContractCode: a.ContractCode,
-		Currency:     a.Currency,
+		ContractCode: a.Contract.Code,
+		Currency:     a.Contract.Currency,
 		Type:         SignalExtreme,
 		Direction:    direction,
 		Strength:     strength,
@@ -184,8 +184,8 @@ func (sd *SignalDetector) detectDivergence(a domain.COTAnalysis, history []domai
 	consecutive := 1
 	if len(history) >= 3 {
 		for i := 1; i < min(4, len(history)-1); i++ {
-			prevSpecChg := history[i].SpecLongChg - history[i].SpecShortChg
-			prevCommChg := history[i].CommLongChg - history[i].CommShortChg
+			prevSpecChg := history[i].SpecLongChange - history[i].SpecShortChange
+			prevCommChg := history[i].CommLongChange - history[i].CommShortChange
 			if (prevSpecChg > 0 && prevCommChg < 0) || (prevSpecChg < 0 && prevCommChg > 0) {
 				consecutive++
 			} else {
@@ -209,14 +209,14 @@ func (sd *SignalDetector) detectDivergence(a domain.COTAnalysis, history []domai
 
 	factors := []string{
 		fmt.Sprintf("Divergence persisting %d weeks", consecutive),
-		fmt.Sprintf("Spec net change: %s", fmtutil.FmtNumSigned(float64(a.SpecNetChange), 0)),
-		fmt.Sprintf("Comm net change: %s", fmtutil.FmtNumSigned(float64(a.CommNetChange), 0)),
+		fmt.Sprintf("Spec net change: %s", fmtutil.FmtNumSigned(a.NetChange, 0)),
+		fmt.Sprintf("Comm net change: %s", fmtutil.FmtNumSigned(a.CommNetChange, 0)),
 		fmt.Sprintf("Momentum direction: %s", a.MomentumDir),
 	}
 
 	return &Signal{
-		ContractCode: a.ContractCode,
-		Currency:     a.Currency,
+		ContractCode: a.Contract.Code,
+		Currency:     a.Contract.Currency,
 		Type:         SignalDivergence,
 		Direction:    direction,
 		Strength:     strength,
@@ -267,12 +267,12 @@ func (sd *SignalDetector) detectMomentumShift(a domain.COTAnalysis, history []do
 	factors := []string{
 		fmt.Sprintf("Momentum flipped from %s to %s", fmtutil.FmtNumSigned(prevMom, 0), fmtutil.FmtNumSigned(currentMom, 0)),
 		fmt.Sprintf("Magnitude of shift: %s", fmtutil.FmtNum(magnitude, 0)),
-		fmt.Sprintf("Spec net position: %s", fmtutil.FmtNumSigned(float64(a.SpecNetPosition), 0)),
+		fmt.Sprintf("Spec net position: %s", fmtutil.FmtNumSigned(a.NetPosition, 0)),
 	}
 
 	return &Signal{
-		ContractCode: a.ContractCode,
-		Currency:     a.Currency,
+		ContractCode: a.Contract.Code,
+		Currency:     a.Contract.Currency,
 		Type:         SignalMomentumShift,
 		Direction:    direction,
 		Strength:     strength,
@@ -291,7 +291,7 @@ func (sd *SignalDetector) detectConcentrationRisk(a domain.COTAnalysis) *Signal 
 
 	// High concentration = potential for sharp reversal
 	direction := "BEARISH" // default: concentrated long = risk of unwind
-	if a.SpecNetPosition < 0 {
+	if a.NetPosition < 0 {
 		direction = "BULLISH" // concentrated short = risk of short squeeze
 	}
 
@@ -307,12 +307,12 @@ func (sd *SignalDetector) detectConcentrationRisk(a domain.COTAnalysis) *Signal 
 	factors := []string{
 		fmt.Sprintf("Top 4 traders: %.1f%% of OI", a.Top4Concentration),
 		fmt.Sprintf("Top 8 traders: %.1f%% of OI", a.Top8Concentration),
-		fmt.Sprintf("Spec net: %s", fmtutil.FmtNumSigned(float64(a.SpecNetPosition), 0)),
+		fmt.Sprintf("Spec net: %s", fmtutil.FmtNumSigned(a.NetPosition, 0)),
 	}
 
 	return &Signal{
-		ContractCode: a.ContractCode,
-		Currency:     a.Currency,
+		ContractCode: a.Contract.Code,
+		Currency:     a.Contract.Currency,
 		Type:         SignalConcentration,
 		Direction:    direction,
 		Strength:     strength,
@@ -330,7 +330,7 @@ func (sd *SignalDetector) detectCrowdContrarian(a domain.COTAnalysis) *Signal {
 
 	// Crowd is wrong at extremes — contrarian signal
 	direction := "BEARISH"
-	if a.SmallNetPosition < 0 {
+	if a.NetSmallSpec < 0 {
 		direction = "BULLISH" // crowd is short = contrarian buy
 	}
 
@@ -345,13 +345,13 @@ func (sd *SignalDetector) detectCrowdContrarian(a domain.COTAnalysis) *Signal {
 
 	factors := []string{
 		fmt.Sprintf("Crowding index: %.1f (extreme)", a.CrowdingIndex),
-		fmt.Sprintf("Small spec net: %s", fmtutil.FmtNumSigned(float64(a.SmallNetPosition), 0)),
+		fmt.Sprintf("Small spec net: %s", fmtutil.FmtNumSigned(a.NetSmallSpec, 0)),
 		fmt.Sprintf("Small spec signal: %s", a.SmallSpecSignal),
 	}
 
 	return &Signal{
-		ContractCode: a.ContractCode,
-		Currency:     a.Currency,
+		ContractCode: a.Contract.Code,
+		Currency:     a.Contract.Currency,
 		Type:         SignalCrowdContrarian,
 		Direction:    direction,
 		Strength:     strength,

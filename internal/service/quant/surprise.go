@@ -80,11 +80,11 @@ func (sc *SurpriseCalculator) ComputeForCurrency(ctx context.Context, currency s
 
 	if len(relevant) == 0 {
 		return &domain.SurpriseIndex{
-			Currency:     currency,
-			RollingScore: 0,
-			WindowDays:   sc.windowDays,
-			DecayFactor:  sc.decayFactor,
-			UpdatedAt:    now,
+			Currency:      currency,
+			RollingScore:  0,
+			WindowDays:    sc.windowDays,
+			DecayHalfLife: math.Log(2) / sc.decayFactor,
+			Timestamp:     now,
 		}, nil
 	}
 
@@ -107,13 +107,22 @@ func (sc *SurpriseCalculator) ComputeForCurrency(ctx context.Context, currency s
 		}
 	}
 
+	comps := make([]domain.SurpriseComponent, 0, len(components))
+	for _, c := range components {
+		comps = append(comps, domain.SurpriseComponent{
+			EventName:      c.EventName,
+			Timestamp:      c.Timestamp,
+			WeightedImpact: c.WeightedImpact,
+		})
+	}
+
 	idx := &domain.SurpriseIndex{
-		Currency:     currency,
-		RollingScore: rollingSum,
-		Components:   components,
-		WindowDays:   sc.windowDays,
-		DecayFactor:  sc.decayFactor,
-		UpdatedAt:    now,
+		Currency:      currency,
+		RollingScore:  rollingSum,
+		Components:    comps,
+		WindowDays:    sc.windowDays,
+		DecayHalfLife: math.Log(2) / sc.decayFactor,
+		Timestamp:     now,
 	}
 
 	return idx, nil
@@ -214,8 +223,8 @@ func (sc *SurpriseCalculator) computeEventSurprise(ev domain.FFEvent, now time.T
 	}
 
 	// Time decay: more recent events have higher weight
-	daysAgo := now.Sub(ev.DateTime).Hours() / 24
-	decay := mathutil.ExponentialDecay(sc.decayFactor, daysAgo)
+	daysAgo := now.Sub(ev.Date).Hours() / 24
+	decay := mathutil.ExponentialDecay(1.0, daysAgo, math.Log(2)/sc.decayFactor)
 
 	// Weighted impact
 	weighted := normalized * impactWeight * decay
@@ -227,7 +236,7 @@ func (sc *SurpriseCalculator) computeEventSurprise(ev domain.FFEvent, now time.T
 		Surprise:          rawSurprise,
 		NormalizedSurprise: normalized,
 		WeightedImpact:    weighted,
-		Timestamp:         ev.DateTime,
+		Timestamp:         ev.Date,
 	}
 }
 

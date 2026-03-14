@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/arkcode369/ff-calendar-bot/internal/domain"
 	"github.com/arkcode369/ff-calendar-bot/internal/ports"
@@ -45,8 +46,8 @@ func (vp *VolatilityPredictor) PredictForEvent(ctx context.Context, event domain
 	// Compute historical surprises
 	var surprises []float64
 	for _, h := range history {
-		actual := parseNumericValue(h.Actual)
-		forecast := parseNumericValue(h.Forecast)
+		actual := h.Actual
+		forecast := h.Forecast
 		if math.IsNaN(actual) || math.IsNaN(forecast) {
 			continue
 		}
@@ -77,20 +78,16 @@ func (vp *VolatilityPredictor) PredictForEvent(ctx context.Context, event domain
 	if mean > 0 {
 		cv = stdDev / mean // coefficient of variation
 	}
-	confidence := mathutil.Clamp(100-cv*30-float64(24-len(history))*2, 20, 95)
-
-	// Impact score (0-100): combines expected move magnitude with confidence
-	impactScore := mathutil.Clamp(expectedPips*2+confidence*0.3, 0, 100)
+	_ = mathutil.Clamp(100-cv*30-float64(24-len(history))*2, 20, 95)
 
 	pred := &domain.VolatilityPrediction{
-		EventName:       event.Title,
-		Currency:        event.Currency,
-		ExpectedPipMove: math.Round(expectedPips*10) / 10,
+		EventName:         event.Title,
+		Currency:          event.Currency,
+		ExpectedPipMove:   math.Round(expectedPips*10) / 10,
 		HistoricalAvgMove: math.Round(histAvgMove*10) / 10,
-		ImpactScore:     math.Round(impactScore),
-		Confidence:      math.Round(confidence),
-		SampleSize:      len(surprises),
-		StdDev:          math.Round(stdDev*multiplier*10) / 10,
+		Confidence:        domain.ClassifyConfidence(len(surprises)),
+		DataPoints:        len(surprises),
+		HistoricalStdDev:  math.Round(stdDev*multiplier*10) / 10,
 	}
 
 	return pred, nil
@@ -99,7 +96,7 @@ func (vp *VolatilityPredictor) PredictForEvent(ctx context.Context, event domain
 // PredictUpcoming generates volatility predictions for all upcoming high-impact events.
 func (vp *VolatilityPredictor) PredictUpcoming(ctx context.Context, hours int) (*domain.VolatilityForecast, error) {
 	now := timeutil.NowWIB()
-	end := now.Add(timeutil.Hours(hours))
+	end := now.Add(time.Duration(hours) * time.Hour)
 
 	events, err := vp.eventRepo.GetEventsByDateRange(ctx, now, end)
 	if err != nil {
@@ -107,8 +104,8 @@ func (vp *VolatilityPredictor) PredictUpcoming(ctx context.Context, hours int) (
 	}
 
 	forecast := &domain.VolatilityForecast{
-		Timeframe: fmt.Sprintf("Next %d hours", hours),
-		UpdatedAt: now,
+		Timestamp:   now,
+		WindowHours: hours,
 	}
 
 	for _, ev := range events {
@@ -121,7 +118,7 @@ func (vp *VolatilityPredictor) PredictUpcoming(ctx context.Context, hours int) (
 			log.Printf("[volatility] warn: predict %s: %v", ev.Title, err)
 			continue
 		}
-		pred.EventTime = ev.DateTime
+		pred.EventDate = ev.Date
 		forecast.Predictions = append(forecast.Predictions, *pred)
 	}
 
@@ -130,24 +127,22 @@ func (vp *VolatilityPredictor) PredictUpcoming(ctx context.Context, hours int) (
 		var totalImpact float64
 		var maxMove float64
 		for _, p := range forecast.Predictions {
-			totalImpact += p.ImpactScore
+			totalImpact += p.ExpectedPipMove
 			if p.ExpectedPipMove > maxMove {
 				maxMove = p.ExpectedPipMove
 			}
 		}
-		forecast.AggregateImpact = totalImpact / float64(len(forecast.Predictions))
-		forecast.MaxExpectedMove = maxMove
+		avgMove := totalImpact / float64(len(forecast.Predictions))
+		forecast.MaxExpected = maxMove
 
 		// Classify overall volatility
 		switch {
-		case forecast.AggregateImpact >= 70 || maxMove >= 80:
-			forecast.VolatilityLevel = "EXTREME"
-		case forecast.AggregateImpact >= 50 || maxMove >= 50:
-			forecast.VolatilityLevel = "HIGH"
-		case forecast.AggregateImpact >= 30 || maxMove >= 25:
-			forecast.VolatilityLevel = "MODERATE"
+		case avgMove >= 70 || maxMove >= 80:
+			forecast.RiskWindow = "ELEVATED"
+		case avgMove >= 30 || maxMove >= 25:
+			forecast.RiskWindow = "NORMAL"
 		default:
-			forecast.VolatilityLevel = "LOW"
+			forecast.RiskWindow = "QUIET"
 		}
 	}
 
@@ -157,47 +152,38 @@ func (vp *VolatilityPredictor) PredictUpcoming(ctx context.Context, hours int) (
 // fallbackPrediction creates an estimate based on event impact level only.
 func (vp *VolatilityPredictor) fallbackPrediction(event domain.FFEvent) *domain.VolatilityPrediction {
 	// Default pip estimates by impact level
-	var expectedPips, impactScore float64
+	var expectedPips float64
 
 	switch event.Impact {
 	case domain.ImpactHigh:
 		expectedPips = 40
-		impactScore = 60
 	case domain.ImpactMedium:
 		expectedPips = 20
-		impactScore = 35
 	default:
 		expectedPips = 10
-		impactScore = 15
 	}
 
 	// Adjust for known high-volatility events
 	titleLower := strings.ToLower(event.Title)
 	if strings.Contains(titleLower, "nonfarm") || strings.Contains(titleLower, "non-farm") {
 		expectedPips = 80
-		impactScore = 90
 	} else if strings.Contains(titleLower, "cpi") || strings.Contains(titleLower, "inflation") {
 		expectedPips = 60
-		impactScore = 80
 	} else if strings.Contains(titleLower, "gdp") {
 		expectedPips = 50
-		impactScore = 70
 	} else if strings.Contains(titleLower, "rate decision") || strings.Contains(titleLower, "interest rate") {
 		expectedPips = 70
-		impactScore = 85
 	} else if strings.Contains(titleLower, "employment") || strings.Contains(titleLower, "jobs") {
 		expectedPips = 50
-		impactScore = 65
 	}
 
 	return &domain.VolatilityPrediction{
 		EventName:         event.Title,
 		Currency:          event.Currency,
 		ExpectedPipMove:   expectedPips,
-		HistoricalAvgMove: expectedPips, // no history, use same
-		ImpactScore:       impactScore,
-		Confidence:        25, // low confidence without history
-		SampleSize:        0,
+		HistoricalAvgMove: expectedPips,
+		Confidence:        domain.ConfidenceLow,
+		DataPoints:        0,
 	}
 }
 
@@ -257,10 +243,10 @@ func FormatVolatilityForecast(forecast *domain.VolatilityForecast) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("=== VOLATILITY FORECAST (%s) ===\n", forecast.Timeframe))
-	b.WriteString(fmt.Sprintf("Level: %s | Max Move: %s pips\n\n",
-		forecast.VolatilityLevel,
-		fmtutil.FmtNum(forecast.MaxExpectedMove, 0)))
+	b.WriteString("=== VOLATILITY FORECAST ===\n")
+	b.WriteString(fmt.Sprintf("Risk: %s | Max Move: %s pips\n\n",
+		forecast.RiskWindow,
+		fmtutil.FmtNum(forecast.MaxExpected, 0)))
 
 	for i, p := range forecast.Predictions {
 		if i >= 8 {
@@ -269,29 +255,25 @@ func FormatVolatilityForecast(forecast *domain.VolatilityForecast) string {
 		}
 
 		timeStr := ""
-		if !p.EventTime.IsZero() {
-			timeStr = p.EventTime.Format("15:04")
+		if !p.EventDate.IsZero() {
+			timeStr = p.EventDate.Format("15:04")
 		}
 
 		confBar := confidenceBar(p.Confidence)
 		b.WriteString(fmt.Sprintf("%s %s %s\n", timeStr, p.Currency, p.EventName))
-		b.WriteString(fmt.Sprintf("  Expected: %s pips | Impact: %.0f | Conf: %s\n",
-			fmtutil.FmtNum(p.ExpectedPipMove, 1), p.ImpactScore, confBar))
+		b.WriteString(fmt.Sprintf("  Expected: %s pips | Conf: %s\n",
+			fmtutil.FmtNum(p.ExpectedPipMove, 1), confBar))
 	}
 
 	return b.String()
 }
 
-func confidenceBar(conf float64) string {
-	switch {
-	case conf >= 80:
+func confidenceBar(conf domain.ConfidenceLevel) string {
+	switch conf {
+	case domain.ConfidenceHigh:
 		return "[*****]"
-	case conf >= 60:
-		return "[**** ]"
-	case conf >= 40:
+	case domain.ConfidenceMedium:
 		return "[***  ]"
-	case conf >= 20:
-		return "[**   ]"
 	default:
 		return "[*    ]"
 	}

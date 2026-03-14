@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/arkcode369/ff-calendar-bot/internal/domain"
-	"github.com/arkcode369/ff-calendar-bot/internal/ports"
 	"github.com/arkcode369/ff-calendar-bot/pkg/fmtutil"
 )
 
@@ -78,10 +77,10 @@ func BuildEventImpactPrompt(event domain.FFEvent, history []domain.FFEventDetail
 				break
 			}
 			surprise := ""
-			if h.Actual != "" && h.Forecast != "" {
-				surprise = fmt.Sprintf(" (surprise: %s vs %s)", h.Actual, h.Forecast)
+			if h.Actual != 0 && h.Forecast != 0 {
+				surprise = fmt.Sprintf(" (surprise: %.4g vs %.4g)", h.Actual, h.Forecast)
 			}
-			b.WriteString(fmt.Sprintf("  %s: A=%s F=%s P=%s%s\n",
+			b.WriteString(fmt.Sprintf("  %s: A=%.4g F=%.4g P=%.4g%s\n",
 				h.Date.Format("Jan 2006"), h.Actual, h.Forecast, h.Previous, surprise))
 		}
 	}
@@ -118,7 +117,7 @@ func BuildConfluencePrompt(score domain.ConfluenceScore) string {
 }
 
 // BuildWeeklyOutlookPrompt creates a prompt for weekly market outlook.
-func BuildWeeklyOutlookPrompt(data ports.WeeklyData) string {
+func BuildWeeklyOutlookPrompt(data WeeklyOutlookData) string {
 	var b strings.Builder
 	b.WriteString("Generate a comprehensive weekly forex fundamental outlook.\n\n")
 
@@ -135,9 +134,9 @@ func BuildWeeklyOutlookPrompt(data ports.WeeklyData) string {
 	}
 
 	// Economic calendar
-	if len(data.UpcomingEvents) > 0 {
+	if len(data.HighImpactEvents) > 0 {
 		b.WriteString("=== KEY EVENTS THIS WEEK ===\n")
-		for _, ev := range data.UpcomingEvents {
+		for _, ev := range data.HighImpactEvents {
 			b.WriteString(fmt.Sprintf("%s %s: %s (F:%s P:%s)\n",
 				ev.Date.Format("Mon 15:04"), ev.Currency, ev.Title,
 				ev.Forecast, ev.Previous))
@@ -149,15 +148,18 @@ func BuildWeeklyOutlookPrompt(data ports.WeeklyData) string {
 	if len(data.SurpriseIndices) > 0 {
 		b.WriteString("=== ECONOMIC SURPRISE ===\n")
 		for _, idx := range data.SurpriseIndices {
+			if idx == nil {
+				continue
+			}
 			b.WriteString(fmt.Sprintf("%s: %s\n", idx.Currency, fmtutil.FmtNumSigned(idx.RollingScore, 1)))
 		}
 		b.WriteString("\n")
 	}
 
 	// Currency rankings
-	if data.CurrencyRanking != nil && len(data.CurrencyRanking.Rankings) > 0 {
+	if data.Rankings != nil && len(data.Rankings.Rankings) > 0 {
 		b.WriteString("=== CURRENCY STRENGTH ===\n")
-		for _, r := range data.CurrencyRanking.Rankings {
+		for _, r := range data.Rankings.Rankings {
 			b.WriteString(fmt.Sprintf("%d. %s (%.1f)\n", r.Rank, r.Score.Code, r.Score.CompositeScore))
 		}
 		b.WriteString("\n")

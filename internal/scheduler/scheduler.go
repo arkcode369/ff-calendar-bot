@@ -264,18 +264,16 @@ func (s *Scheduler) jobFFRevision(ctx context.Context) error {
 		return nil
 	}
 
-	revisions, err := s.deps.CalService.ScrapeAndStore(ctx)
+	_, _, err = s.deps.CalService.ScrapeAndStore(ctx)
 	if err != nil {
 		return fmt.Errorf("revision scrape: %w", err)
 	}
-
-	_ = revisions // Revisions are detected and stored inside ScrapeAndStore
 	return nil
 }
 
 // jobCOTFetch fetches latest COT data from CFTC and runs analysis.
 func (s *Scheduler) jobCOTFetch(ctx context.Context) error {
-	if err := s.deps.COTAnalyzer.FetchAndAnalyze(ctx); err != nil {
+	if _, err := s.deps.COTAnalyzer.AnalyzeAll(ctx); err != nil {
 		return fmt.Errorf("cot fetch+analyze: %w", err)
 	}
 
@@ -285,7 +283,7 @@ func (s *Scheduler) jobCOTFetch(ctx context.Context) error {
 
 // jobSurpriseCalc recalculates surprise indices for all currencies.
 func (s *Scheduler) jobSurpriseCalc(ctx context.Context) error {
-	if err := s.deps.SurpriseCalc.RecalculateAll(ctx); err != nil {
+	if _, err := s.deps.SurpriseCalc.ComputeAll(ctx); err != nil {
 		return fmt.Errorf("surprise recalc: %w", err)
 	}
 
@@ -323,7 +321,7 @@ func (s *Scheduler) jobConfluenceCalc(ctx context.Context) error {
 
 // jobVolatility computes volatility forecasts.
 func (s *Scheduler) jobVolatility(ctx context.Context) error {
-	forecast, err := s.deps.VolatilityPredictor.Predict(ctx)
+	forecast, err := s.deps.VolatilityPredictor.PredictUpcoming(ctx, 48)
 	if err != nil {
 		return fmt.Errorf("volatility predict: %w", err)
 	}
@@ -332,8 +330,8 @@ func (s *Scheduler) jobVolatility(ctx context.Context) error {
 		return fmt.Errorf("save volatility forecast: %w", err)
 	}
 
-	log.Printf("[SCHED:volatility] Forecast: regime=%s, score=%.1f",
-		forecast.Regime, forecast.OverallScore)
+	log.Printf("[SCHED:volatility] Forecast: risk_window=%s, max_expected=%.1f",
+		forecast.RiskWindow, forecast.MaxExpected)
 	return nil
 }
 
@@ -348,7 +346,7 @@ func (s *Scheduler) jobCurrencyRank(ctx context.Context) error {
 		return fmt.Errorf("save ranking: %w", err)
 	}
 
-	log.Printf("[SCHED:currency-rank] Ranked %d currencies", len(ranking.Scores))
+	log.Printf("[SCHED:currency-rank] Ranked %d currencies", len(ranking.Rankings))
 	return nil
 }
 

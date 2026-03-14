@@ -35,22 +35,44 @@ func TodayWIB() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, WIB)
 }
 
-// StartOfWeekWIB returns the Monday of the current week in WIB.
-func StartOfWeekWIB() time.Time {
-	now := NowWIB()
-	weekday := int(now.Weekday())
+// StartOfWeekWIB returns the Monday of the week containing t in WIB.
+func StartOfWeekWIB(t time.Time) time.Time {
+	w := t.In(WIB)
+	weekday := int(w.Weekday())
 	if weekday == 0 {
 		weekday = 7 // Sunday = 7
 	}
-	monday := now.AddDate(0, 0, -(weekday - 1))
+	monday := w.AddDate(0, 0, -(weekday - 1))
 	return time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, WIB)
 }
 
-// EndOfWeekWIB returns the Sunday 23:59:59 of the current week in WIB.
+// StartOfWeek is an alias for StartOfWeekWIB.
+func StartOfWeek(t time.Time) time.Time {
+	return StartOfWeekWIB(t)
+}
+
+// EndOfWeekWIB returns the Sunday 23:59:59 of the week containing t in WIB.
 func EndOfWeekWIB() time.Time {
-	monday := StartOfWeekWIB()
+	monday := StartOfWeekWIB(NowWIB())
 	sunday := monday.AddDate(0, 0, 6)
 	return time.Date(sunday.Year(), sunday.Month(), sunday.Day(), 23, 59, 59, 0, WIB)
+}
+
+// StartOfDayWIB returns the start of the day (00:00:00) for the given time in WIB.
+func StartOfDayWIB(t time.Time) time.Time {
+	w := t.In(WIB)
+	return time.Date(w.Year(), w.Month(), w.Day(), 0, 0, 0, 0, WIB)
+}
+
+// StartOfDay is an alias for StartOfDayWIB.
+func StartOfDay(t time.Time) time.Time {
+	return StartOfDayWIB(t)
+}
+
+// EndOfDay returns the end of the day (23:59:59) for the given time in WIB.
+func EndOfDay(t time.Time) time.Time {
+	w := t.In(WIB)
+	return time.Date(w.Year(), w.Month(), w.Day(), 23, 59, 59, 0, WIB)
 }
 
 // ---------------------------------------------------------------------------

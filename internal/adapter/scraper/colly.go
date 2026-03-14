@@ -368,7 +368,7 @@ func (s *CollyFFScraper) parseDateCell(cell string) (time.Time, error) {
 	for _, layout := range formats {
 		if t, err := time.Parse(layout, cell); err == nil {
 			// Set year to current year
-			return time.Date(now.Year(), t.Month(), t.Day(), 0, 0, 0, 0, timeutil.WIB()), nil
+			return time.Date(now.Year(), t.Month(), t.Day(), 0, 0, 0, 0, timeutil.WIB), nil
 		}
 	}
 
@@ -396,7 +396,7 @@ func (s *CollyFFScraper) parseTimeCell(timeStr string, day time.Time) time.Time 
 			// Build full datetime in ET, then convert to WIB
 			etTime := time.Date(day.Year(), day.Month(), day.Day(),
 				t.Hour(), t.Minute(), 0, 0, et)
-			return etTime.In(timeutil.WIB())
+			return etTime.In(timeutil.WIB)
 		}
 	}
 

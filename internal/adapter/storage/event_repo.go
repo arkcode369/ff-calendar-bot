@@ -64,7 +64,7 @@ func (r *EventRepo) SaveEvents(_ context.Context, events []domain.FFEvent) error
 		if err != nil {
 			return fmt.Errorf("marshal event %s: %w", events[i].ID, err)
 		}
-		key := eventKey(events[i].DateTime, events[i].ID)
+		key := eventKey(events[i].Date, events[i].ID)
 		if err := wb.Set(key, data); err != nil {
 			return fmt.Errorf("batch set event %s: %w", events[i].ID, err)
 		}
@@ -161,8 +161,9 @@ func (r *EventRepo) GetEventHistory(_ context.Context, eventName, currency strin
 	return history, nil
 }
 
-// SaveEventHistory stores historical data points for an event.
-func (r *EventRepo) SaveEventHistory(_ context.Context, currency, eventName string, details []domain.FFEventDetail) error {
+// SaveEventDetails stores historical data points for an event.
+// Uses EventName and Currency from each detail to build the storage key.
+func (r *EventRepo) SaveEventDetails(_ context.Context, details []domain.FFEventDetail) error {
 	wb := r.db.NewWriteBatch()
 	defer wb.Cancel()
 
@@ -171,16 +172,93 @@ func (r *EventRepo) SaveEventHistory(_ context.Context, currency, eventName stri
 		if err != nil {
 			return fmt.Errorf("marshal event detail: %w", err)
 		}
-		key := eventHistKey(currency, eventName, details[i].Date)
+		key := eventHistKey(details[i].Currency, details[i].EventName, details[i].Date)
 		if err := wb.Set(key, data); err != nil {
-			return fmt.Errorf("batch set event history: %w", err)
+			return fmt.Errorf("batch set event detail: %w", err)
 		}
 	}
 
 	if err := wb.Flush(); err != nil {
-		return fmt.Errorf("flush event history batch: %w", err)
+		return fmt.Errorf("flush event details batch: %w", err)
 	}
 	return nil
+}
+
+// GetEventsByDate retrieves all events for a specific date.
+func (r *EventRepo) GetEventsByDate(ctx context.Context, date time.Time) ([]domain.FFEvent, error) {
+	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	end := start.AddDate(0, 0, 1)
+	return r.GetEventsByDateRange(ctx, start, end)
+}
+
+// GetHighImpactEvents retrieves only high-impact events in date range.
+func (r *EventRepo) GetHighImpactEvents(ctx context.Context, start, end time.Time) ([]domain.FFEvent, error) {
+	all, err := r.GetEventsByDateRange(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+	var result []domain.FFEvent
+	for _, ev := range all {
+		if ev.Impact == domain.ImpactHigh {
+			result = append(result, ev)
+		}
+	}
+	return result, nil
+}
+
+// GetEventsByCurrency retrieves events filtered by currency code.
+func (r *EventRepo) GetEventsByCurrency(ctx context.Context, currency string, start, end time.Time) ([]domain.FFEvent, error) {
+	all, err := r.GetEventsByDateRange(ctx, start, end)
+	if err != nil {
+		return nil, err
+	}
+	var result []domain.FFEvent
+	for _, ev := range all {
+		if ev.Currency == currency {
+			result = append(result, ev)
+		}
+	}
+	return result, nil
+}
+
+// GetAllRevisions retrieves all revisions within the last N days.
+func (r *EventRepo) GetAllRevisions(_ context.Context, days int) ([]domain.EventRevision, error) {
+	var revisions []domain.EventRevision
+	cutoff := time.Now().AddDate(0, 0, -days).Format("20060102")
+	prefix := []byte("evtrev:")
+
+	err := r.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		opts.PrefetchValues = true
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			parts := strings.Split(string(item.Key()), ":")
+			if len(parts) >= 3 && parts[2] < cutoff {
+				continue
+			}
+			err := item.Value(func(val []byte) error {
+				var rev domain.EventRevision
+				if err := json.Unmarshal(val, &rev); err != nil {
+					return err
+				}
+				revisions = append(revisions, rev)
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("read revision: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get all revisions: %w", err)
+	}
+	return revisions, nil
 }
 
 // SaveRevision stores an event revision record.

@@ -53,7 +53,7 @@ func (f *Fetcher) FetchLatest(ctx context.Context, contracts []domain.COTContrac
 // Uses Socrata with $where and $order for efficient server-side filtering.
 func (f *Fetcher) FetchHistory(ctx context.Context, contract domain.COTContract, weeks int) ([]domain.COTRecord, error) {
 	url := fmt.Sprintf("%s?$where=cftc_contract_market_code='%s'&$order=report_date_as_yyyy_mm_dd DESC&$limit=%d",
-		f.socrataURL, contract.CFTCCode, weeks)
+		f.socrataURL, contract.Code, weeks)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -89,7 +89,7 @@ func (f *Fetcher) fetchFromSocrata(ctx context.Context, contracts []domain.COTCo
 	// Build $where clause for all tracked contracts
 	codes := make([]string, len(contracts))
 	for i, c := range contracts {
-		codes[i] = fmt.Sprintf("'%s'", c.CFTCCode)
+		codes[i] = fmt.Sprintf("'%s'", c.Code)
 	}
 	where := fmt.Sprintf("cftc_contract_market_code in(%s)", strings.Join(codes, ","))
 
@@ -124,14 +124,14 @@ func (f *Fetcher) fetchFromSocrata(ctx context.Context, contracts []domain.COTCo
 	var records []domain.COTRecord
 
 	for _, sr := range raw {
-		contract, ok := contractMap[sr.CFTCCode]
+		contract, ok := contractMap[sr.ContractCode]
 		if !ok {
 			continue
 		}
-		if seen[sr.CFTCCode] {
+		if seen[sr.ContractCode] {
 			continue // already have latest for this contract
 		}
-		seen[sr.CFTCCode] = true
+		seen[sr.ContractCode] = true
 		records = append(records, socrataToRecord(sr, contract))
 	}
 
@@ -192,41 +192,44 @@ func (f *Fetcher) fetchFromCSV(ctx context.Context, contracts []domain.COTContra
 
 // --- conversion helpers ---
 
+// socrataFloat parses a string field from Socrata JSON to float64.
+func socrataFloat(s string) float64 {
+	s = strings.ReplaceAll(s, ",", "")
+	v, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	return v
+}
+
 // socrataToRecord converts a Socrata JSON record to our domain model.
 func socrataToRecord(sr domain.SocrataRecord, contract domain.COTContract) domain.COTRecord {
 	reportDate, _ := time.Parse("2006-01-02T15:04:05.000", sr.ReportDate)
-	if reportDate.IsZero() {
+	if reportDate.IsZero() && len(sr.ReportDate) >= 10 {
 		reportDate, _ = time.Parse("2006-01-02", sr.ReportDate[:10])
 	}
 
 	return domain.COTRecord{
 		ContractCode: contract.Code,
 		ContractName: contract.Name,
-		Currency:     contract.Currency,
 		ReportDate:   reportDate,
 
-		CommLong:  sr.CommLong,
-		CommShort: sr.CommShort,
-		SpecLong:  sr.SpecLong,
-		SpecShort: sr.SpecShort,
-		SmallLong: sr.SmallLong,
-		SmallShort: sr.SmallShort,
-		OpenInterest: sr.OpenInterest,
+		CommLong:   socrataFloat(sr.CommLong),
+		CommShort:  socrataFloat(sr.CommShort),
+		SpecLong:   socrataFloat(sr.SpecLong),
+		SpecShort:  socrataFloat(sr.SpecShort),
+		SmallLong:  socrataFloat(sr.SmallLong),
+		SmallShort: socrataFloat(sr.SmallShort),
+		OpenInterest: socrataFloat(sr.OpenInterest),
 
-		CommLongChg:  sr.CommLongChg,
-		CommShortChg: sr.CommShortChg,
-		SpecLongChg:  sr.SpecLongChg,
-		SpecShortChg: sr.SpecShortChg,
-		SmallLongChg: sr.SmallLongChg,
-		SmallShortChg: sr.SmallShortChg,
-		OIChange:     sr.OIChange,
+		CommLongChange:  socrataFloat(sr.CommLongChange),
+		CommShortChange: socrataFloat(sr.CommShortChange),
+		SpecLongChange:  socrataFloat(sr.SpecLongChange),
+		SpecShortChange: socrataFloat(sr.SpecShortChange),
+		SmallLongChange: socrataFloat(sr.SmallLongChange),
+		SmallShortChange: socrataFloat(sr.SmallShortChange),
 
-		Top4Long:  sr.Top4Long,
-		Top4Short: sr.Top4Short,
-		Top8Long:  sr.Top8Long,
-		Top8Short: sr.Top8Short,
-
-		FetchedAt: time.Now(),
+		Top4Long:  socrataFloat(sr.Top4Long),
+		Top4Short: socrataFloat(sr.Top4Short),
+		Top8Long:  socrataFloat(sr.Top8Long),
+		Top8Short: socrataFloat(sr.Top8Short),
 	}
 }
 
@@ -241,31 +244,27 @@ func csvRowToRecord(row []string, colIdx map[string]int, contract domain.COTCont
 	return domain.COTRecord{
 		ContractCode: contract.Code,
 		ContractName: contract.Name,
-		Currency:     contract.Currency,
 		ReportDate:   reportDate,
 
-		CommLong:  csvInt(row, colIdx, "Comm_Positions_Long_All"),
-		CommShort: csvInt(row, colIdx, "Comm_Positions_Short_All"),
-		SpecLong:  csvInt(row, colIdx, "NonComm_Positions_Long_All"),
-		SpecShort: csvInt(row, colIdx, "NonComm_Positions_Short_All"),
-		SmallLong: csvInt(row, colIdx, "NonRept_Positions_Long_All"),
-		SmallShort: csvInt(row, colIdx, "NonRept_Positions_Short_All"),
-		OpenInterest: csvInt(row, colIdx, "Open_Interest_All"),
+		CommLong:     csvFloat(row, colIdx, "Comm_Positions_Long_All"),
+		CommShort:    csvFloat(row, colIdx, "Comm_Positions_Short_All"),
+		SpecLong:     csvFloat(row, colIdx, "NonComm_Positions_Long_All"),
+		SpecShort:    csvFloat(row, colIdx, "NonComm_Positions_Short_All"),
+		SmallLong:    csvFloat(row, colIdx, "NonRept_Positions_Long_All"),
+		SmallShort:   csvFloat(row, colIdx, "NonRept_Positions_Short_All"),
+		OpenInterest: csvFloat(row, colIdx, "Open_Interest_All"),
 
-		CommLongChg:  csvInt(row, colIdx, "Change_in_Comm_Long_All"),
-		CommShortChg: csvInt(row, colIdx, "Change_in_Comm_Short_All"),
-		SpecLongChg:  csvInt(row, colIdx, "Change_in_NonComm_Long_All"),
-		SpecShortChg: csvInt(row, colIdx, "Change_in_NonComm_Short_All"),
-		SmallLongChg: csvInt(row, colIdx, "Change_in_NonRept_Long_All"),
-		SmallShortChg: csvInt(row, colIdx, "Change_in_NonRept_Short_All"),
-		OIChange:     csvInt(row, colIdx, "Change_in_Open_Interest_All"),
+		CommLongChange:  csvFloat(row, colIdx, "Change_in_Comm_Long_All"),
+		CommShortChange: csvFloat(row, colIdx, "Change_in_Comm_Short_All"),
+		SpecLongChange:  csvFloat(row, colIdx, "Change_in_NonComm_Long_All"),
+		SpecShortChange: csvFloat(row, colIdx, "Change_in_NonComm_Short_All"),
+		SmallLongChange: csvFloat(row, colIdx, "Change_in_NonRept_Long_All"),
+		SmallShortChange: csvFloat(row, colIdx, "Change_in_NonRept_Short_All"),
 
 		Top4Long:  csvFloat(row, colIdx, "Pct_of_OI_4_or_Less_Long_All"),
 		Top4Short: csvFloat(row, colIdx, "Pct_of_OI_4_or_Less_Short_All"),
 		Top8Long:  csvFloat(row, colIdx, "Pct_of_OI_8_or_Less_Long_All"),
 		Top8Short: csvFloat(row, colIdx, "Pct_of_OI_8_or_Less_Short_All"),
-
-		FetchedAt: time.Now(),
 	}
 }
 
@@ -274,7 +273,7 @@ func csvRowToRecord(row []string, colIdx map[string]int, contract domain.COTCont
 func buildContractMap(contracts []domain.COTContract) map[string]domain.COTContract {
 	m := make(map[string]domain.COTContract, len(contracts))
 	for _, c := range contracts {
-		m[c.CFTCCode] = c
+		m[c.Code] = c
 	}
 	return m
 }

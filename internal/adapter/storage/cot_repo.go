@@ -152,9 +152,9 @@ func (r *COTRepo) SaveAnalyses(_ context.Context, analyses []domain.COTAnalysis)
 	for i := range analyses {
 		data, err := json.Marshal(&analyses[i])
 		if err != nil {
-			return fmt.Errorf("marshal COT analysis %s: %w", analyses[i].ContractCode, err)
+			return fmt.Errorf("marshal COT analysis %s: %w", analyses[i].Contract.Code, err)
 		}
-		key := cotAnalysisKey(analyses[i].ContractCode, analyses[i].ReportDate)
+		key := cotAnalysisKey(analyses[i].Contract.Code, analyses[i].ReportDate)
 		if err := wb.Set(key, data); err != nil {
 			return fmt.Errorf("batch set COT analysis: %w", err)
 		}
@@ -205,8 +205,8 @@ func (r *COTRepo) GetLatestAnalysis(_ context.Context, contractCode string) (*do
 
 // GetAllLatestAnalyses returns the latest analysis for every contract.
 // Scans all cotanl: keys and keeps only the most recent per contract.
-func (r *COTRepo) GetAllLatestAnalyses(_ context.Context) (map[string]*domain.COTAnalysis, error) {
-	result := make(map[string]*domain.COTAnalysis)
+func (r *COTRepo) GetAllLatestAnalyses(_ context.Context) ([]domain.COTAnalysis, error) {
+	latest := make(map[string]*domain.COTAnalysis)
 
 	err := r.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -231,7 +231,7 @@ func (r *COTRepo) GetAllLatestAnalyses(_ context.Context) (map[string]*domain.CO
 					return err
 				}
 				// Since keys are sorted, last one per contract is the latest
-				result[contractCode] = &a
+				latest[contractCode] = &a
 				return nil
 			})
 			if err != nil {
@@ -242,6 +242,11 @@ func (r *COTRepo) GetAllLatestAnalyses(_ context.Context) (map[string]*domain.CO
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get all latest analyses: %w", err)
+	}
+
+	result := make([]domain.COTAnalysis, 0, len(latest))
+	for _, a := range latest {
+		result = append(result, *a)
 	}
 	return result, nil
 }

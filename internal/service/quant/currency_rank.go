@@ -64,12 +64,16 @@ func (cr *CurrencyRanker) RankAll(ctx context.Context) (*domain.CurrencyRanking,
 	sortScores(scores)
 
 	// Assign ranks
-	for i := range scores {
-		scores[i].Rank = i + 1
+	rankedCurrencies := make([]domain.RankedCurrency, len(scores))
+	for i, s := range scores {
+		rankedCurrencies[i] = domain.RankedCurrency{
+			Rank:  i + 1,
+			Score: s,
+		}
 	}
 
 	ranking := &domain.CurrencyRanking{
-		Rankings:  scores,
+		Rankings:  rankedCurrencies,
 		Timestamp: now,
 	}
 
@@ -104,23 +108,23 @@ func (cr *CurrencyRanker) AnalyzePair(ctx context.Context, base, quote string) (
 	}
 
 	// Strength magnitude (0-100)
-	strength := mathutil.Clamp(math.Abs(diff)*2, 0, 100)
+	strength := mathutil.Clamp(mathAbs(diff)*2, 0, 100)
 
 	return &domain.PairAnalysis{
-		Base:         base,
-		Quote:        quote,
-		Differential: diff,
-		Direction:    direction,
-		Strength:     strength,
-		BaseScore:    *baseScore,
-		QuoteScore:   *quoteScore,
+		Base:              domain.CurrencyCode(base),
+		Quote:             domain.CurrencyCode(quote),
+		ScoreDifferential: diff,
+		Direction:         direction,
+		Strength:          strength,
+		BaseScore:         *baseScore,
+		QuoteScore:        *quoteScore,
 	}, nil
 }
 
 // computeScore calculates the composite strength score for a single currency.
 func (cr *CurrencyRanker) computeScore(ctx context.Context, currency string) (*domain.CurrencyScore, error) {
 	score := &domain.CurrencyScore{
-		Code: currency,
+		Code: domain.CurrencyCode(currency),
 	}
 
 	now := timeutil.NowWIB()
@@ -139,8 +143,8 @@ func (cr *CurrencyRanker) computeScore(ctx context.Context, currency string) (*d
 		}
 	}
 
-	// Dimension 1: Rate Score (20% weight)
-	score.RateScore = cr.computeRateDimension(ccyEvents)
+	// Dimension 1: Interest Rate Score (20% weight)
+	score.InterestRateScore = cr.computeRateDimension(ccyEvents)
 
 	// Dimension 2: Inflation Score (15% weight)
 	score.InflationScore = cr.computeInflationDimension(ccyEvents)
@@ -158,7 +162,7 @@ func (cr *CurrencyRanker) computeScore(ctx context.Context, currency string) (*d
 	score.SurpriseScore = cr.computeSurpriseDimension(ctx, currency)
 
 	// Weighted composite
-	score.CompositeScore = score.RateScore*0.20 +
+	score.CompositeScore = score.InterestRateScore*0.20 +
 		score.InflationScore*0.15 +
 		score.GDPScore*0.20 +
 		score.EmploymentScore*0.15 +
@@ -258,7 +262,7 @@ func (cr *CurrencyRanker) computeCOTDimension(ctx context.Context, currency stri
 
 // computeSurpriseDimension uses rolling surprise index.
 func (cr *CurrencyRanker) computeSurpriseDimension(ctx context.Context, currency string) float64 {
-	idx, err := cr.surpriseRepo.GetSurpriseIndex(ctx, currency, 30)
+	idx, err := cr.surpriseRepo.GetSurpriseIndex(ctx, currency)
 	if err != nil || idx == nil {
 		return 50
 	}
@@ -320,10 +324,10 @@ func FormatRanking(ranking *domain.CurrencyRanking) string {
 	b.WriteString("=== CURRENCY STRENGTH RANKING ===\n\n")
 
 	for _, s := range ranking.Rankings {
-		bar := strengthBar(s.CompositeScore)
+		bar := strengthBar(s.Score.CompositeScore)
 		b.WriteString(fmt.Sprintf("%d. %s  %s  %s\n",
-			s.Rank, s.Code,
-			fmtutil.FmtNum(s.CompositeScore, 1),
+			s.Rank, s.Score.Code,
+			fmtutil.FmtNum(s.Score.CompositeScore, 1),
 			bar))
 	}
 
@@ -332,8 +336,8 @@ func FormatRanking(ranking *domain.CurrencyRanking) string {
 		strongest := ranking.Rankings[0]
 		weakest := ranking.Rankings[len(ranking.Rankings)-1]
 		b.WriteString(fmt.Sprintf("\nTop pair: %s/%s (diff: %s)\n",
-			strongest.Code, weakest.Code,
-			fmtutil.FmtNum(strongest.CompositeScore-weakest.CompositeScore, 1)))
+			strongest.Score.Code, weakest.Score.Code,
+			fmtutil.FmtNum(strongest.Score.CompositeScore-weakest.Score.CompositeScore, 1)))
 	}
 
 	return b.String()
@@ -353,7 +357,7 @@ func FormatPairAnalysis(pa *domain.PairAnalysis) string {
 	// Base breakdown
 	b.WriteString(fmt.Sprintf("%s Score: %s\n", pa.Base, fmtutil.FmtNum(pa.BaseScore.CompositeScore, 1)))
 	b.WriteString(fmt.Sprintf("  Rate: %s | CPI: %s | GDP: %s\n",
-		fmtutil.FmtNum(pa.BaseScore.RateScore, 0),
+		fmtutil.FmtNum(pa.BaseScore.InterestRateScore, 0),
 		fmtutil.FmtNum(pa.BaseScore.InflationScore, 0),
 		fmtutil.FmtNum(pa.BaseScore.GDPScore, 0)))
 	b.WriteString(fmt.Sprintf("  Jobs: %s | COT: %s | Surprise: %s\n",
@@ -364,7 +368,7 @@ func FormatPairAnalysis(pa *domain.PairAnalysis) string {
 	// Quote breakdown
 	b.WriteString(fmt.Sprintf("\n%s Score: %s\n", pa.Quote, fmtutil.FmtNum(pa.QuoteScore.CompositeScore, 1)))
 	b.WriteString(fmt.Sprintf("  Rate: %s | CPI: %s | GDP: %s\n",
-		fmtutil.FmtNum(pa.QuoteScore.RateScore, 0),
+		fmtutil.FmtNum(pa.QuoteScore.InterestRateScore, 0),
 		fmtutil.FmtNum(pa.QuoteScore.InflationScore, 0),
 		fmtutil.FmtNum(pa.QuoteScore.GDPScore, 0)))
 	b.WriteString(fmt.Sprintf("  Jobs: %s | COT: %s | Surprise: %s\n",
@@ -372,7 +376,7 @@ func FormatPairAnalysis(pa *domain.PairAnalysis) string {
 		fmtutil.FmtNum(pa.QuoteScore.COTScore, 0),
 		fmtutil.FmtNum(pa.QuoteScore.SurpriseScore, 0)))
 
-	b.WriteString(fmt.Sprintf("\nDifferential: %s", fmtutil.FmtNumSigned(pa.Differential, 1)))
+	b.WriteString(fmt.Sprintf("\nDifferential: %s", fmtutil.FmtNumSigned(pa.ScoreDifferential, 1)))
 
 	return b.String()
 }

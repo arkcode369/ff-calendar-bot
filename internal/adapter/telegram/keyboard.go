@@ -37,7 +37,7 @@ func (kb *KeyboardBuilder) COTCurrencySelector(analyses []domain.COTAnalysis) po
 
 	for i, a := range analyses {
 		// Extract short label from contract name
-		label := kb.contractLabel(a.ContractName, a.ContractCode)
+		label := kb.contractLabel(a.Contract.Name, a.Contract.Code)
 
 		// Add bias indicator
 		indicator := "--"
@@ -49,7 +49,7 @@ func (kb *KeyboardBuilder) COTCurrencySelector(analyses []domain.COTAnalysis) po
 
 		btn := ports.InlineButton{
 			Text:         fmt.Sprintf("%s [%s]", label, indicator),
-			CallbackData: fmt.Sprintf("cot:%s", a.ContractCode),
+			CallbackData: fmt.Sprintf("cot:%s", a.Contract.Code),
 		}
 		currentRow = append(currentRow, btn)
 
@@ -73,7 +73,7 @@ func (kb *KeyboardBuilder) COTCurrencySelector(analyses []domain.COTAnalysis) po
 func (kb *KeyboardBuilder) crossMarketRow(analyses []domain.COTAnalysis) []ports.InlineButton {
 	var row []ports.InlineButton
 	for _, a := range analyses {
-		code := strings.ToUpper(a.ContractCode)
+		code := strings.ToUpper(a.Contract.Code)
 		if code == "088691" || code == "067651" { // Gold, Oil
 			continue // Already in main grid
 		}
@@ -134,8 +134,8 @@ func (kb *KeyboardBuilder) ConfluencePairSelector(scores []domain.ConfluenceScor
 		}
 
 		btn := ports.InlineButton{
-			Text:         fmt.Sprintf("%s [%s]", s.Pair, indicator),
-			CallbackData: fmt.Sprintf("conf:%s", s.Pair),
+			Text:         fmt.Sprintf("%s [%s]", s.CurrencyPair, indicator),
+			CallbackData: fmt.Sprintf("conf:%s", s.CurrencyPair),
 		}
 		currentRow = append(currentRow, btn)
 

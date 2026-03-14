@@ -145,7 +145,7 @@ func (r *SurpriseRepo) SaveSurpriseIndex(_ context.Context, idx domain.SurpriseI
 }
 
 // GetSurpriseIndex returns the most recent surprise index for a currency.
-func (r *SurpriseRepo) GetSurpriseIndex(_ context.Context, currency string, days int) (*domain.SurpriseIndex, error) {
+func (r *SurpriseRepo) GetSurpriseIndex(_ context.Context, currency string) (*domain.SurpriseIndex, error) {
 	var idx *domain.SurpriseIndex
 
 	prefix := surpriseIndexPrefix(currency)

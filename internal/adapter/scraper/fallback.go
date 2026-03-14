@@ -119,7 +119,7 @@ func (f *FallbackScraper) convertEvent(raw fairEconomyEvent) (domain.FFEvent, er
 	}
 
 	// Convert to WIB
-	wibTime := eventTime.In(timeutil.WIB())
+	wibTime := eventTime.In(timeutil.WIB)
 
 	// Map country to currency code
 	currency := countryToCurrency(raw.Country)
