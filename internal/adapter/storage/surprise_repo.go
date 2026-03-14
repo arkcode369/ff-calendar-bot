@@ -47,6 +47,22 @@ func confluencePrefix(pair string) []byte {
 	return []byte(fmt.Sprintf("confl:%s:", pair))
 }
 
+func rankingKey(date time.Time) []byte {
+	return []byte(fmt.Sprintf("rank:%s", date.Format("20060102150405")))
+}
+
+func rankingPrefix() []byte {
+	return []byte("rank:")
+}
+
+func volatilityKey(date time.Time) []byte {
+	return []byte(fmt.Sprintf("vol:%s", date.Format("20060102150405")))
+}
+
+func volatilityPrefix() []byte {
+	return []byte("vol:")
+}
+
 // --- SurpriseRepository interface implementation ---
 
 // SaveSurprise stores a single surprise score.
@@ -353,4 +369,110 @@ func (r *SurpriseRepo) GetAllConfluences(_ context.Context) ([]domain.Confluence
 		result = append(result, *score)
 	}
 	return result, nil
+}
+
+// SaveCurrencyRanking persists a currency ranking snapshot.
+func (r *SurpriseRepo) SaveCurrencyRanking(_ context.Context, ranking domain.CurrencyRanking) error {
+	data, err := json.Marshal(&ranking)
+	if err != nil {
+		return fmt.Errorf("marshal ranking: %w", err)
+	}
+
+	key := rankingKey(ranking.Timestamp)
+	err = r.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(key, data)
+	})
+	if err != nil {
+		return fmt.Errorf("save ranking: %w", err)
+	}
+	return nil
+}
+
+// GetLatestRanking retrieves the most recent currency ranking.
+func (r *SurpriseRepo) GetLatestRanking(_ context.Context) (*domain.CurrencyRanking, error) {
+	var ranking *domain.CurrencyRanking
+	prefix := rankingPrefix()
+
+	err := r.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		opts.Reverse = true
+		opts.PrefetchValues = true
+		opts.PrefetchSize = 1
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		seekKey := append(prefix, 0xFF)
+		it.Seek(seekKey)
+
+		if it.ValidForPrefix(prefix) {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				ranking = &domain.CurrencyRanking{}
+				return json.Unmarshal(val, ranking)
+			})
+			if err != nil {
+				return fmt.Errorf("read ranking: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get latest ranking: %w", err)
+	}
+	return ranking, nil
+}
+
+// SaveVolatilityForecast persists a volatility forecast.
+func (r *SurpriseRepo) SaveVolatilityForecast(_ context.Context, forecast domain.VolatilityForecast) error {
+	data, err := json.Marshal(&forecast)
+	if err != nil {
+		return fmt.Errorf("marshal forecast: %w", err)
+	}
+
+	key := volatilityKey(forecast.Timestamp)
+	err = r.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(key, data)
+	})
+	if err != nil {
+		return fmt.Errorf("save forecast: %w", err)
+	}
+	return nil
+}
+
+// GetLatestVolatilityForecast retrieves the most recent forecast.
+func (r *SurpriseRepo) GetLatestVolatilityForecast(_ context.Context) (*domain.VolatilityForecast, error) {
+	var forecast *domain.VolatilityForecast
+	prefix := volatilityPrefix()
+
+	err := r.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		opts.Reverse = true
+		opts.PrefetchValues = true
+		opts.PrefetchSize = 1
+
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		seekKey := append(prefix, 0xFF)
+		it.Seek(seekKey)
+
+		if it.ValidForPrefix(prefix) {
+			item := it.Item()
+			err := item.Value(func(val []byte) error {
+				forecast = &domain.VolatilityForecast{}
+				return json.Unmarshal(val, forecast)
+			})
+			if err != nil {
+				return fmt.Errorf("read forecast: %w", err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get latest forecast: %w", err)
+	}
+	return forecast, nil
 }
