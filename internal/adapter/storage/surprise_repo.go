@@ -273,9 +273,9 @@ func (r *SurpriseRepo) GetConfluenceHistory(_ context.Context, pair string, days
 	return scores, nil
 }
 
-// GetAllLatestConfluences returns the latest confluence score for every pair.
-func (r *SurpriseRepo) GetAllLatestConfluences(_ context.Context) (map[string]*domain.ConfluenceScore, error) {
-	result := make(map[string]*domain.ConfluenceScore)
+// GetAllConfluences returns the latest confluence score for every pair.
+func (r *SurpriseRepo) GetAllConfluences(_ context.Context) ([]domain.ConfluenceScore, error) {
+	latestMap := make(map[string]*domain.ConfluenceScore)
 	confPrefix := []byte("confl:")
 
 	err := r.db.View(func(txn *badger.Txn) error {
@@ -294,7 +294,7 @@ func (r *SurpriseRepo) GetAllLatestConfluences(_ context.Context) (map[string]*d
 					return err
 				}
 				// Keys are sorted, so last per pair wins (latest date)
-				result[s.CurrencyPair] = &s
+				latestMap[s.CurrencyPair] = &s
 				return nil
 			})
 			if err != nil {
@@ -305,6 +305,11 @@ func (r *SurpriseRepo) GetAllLatestConfluences(_ context.Context) (map[string]*d
 	})
 	if err != nil {
 		return nil, fmt.Errorf("get all confluences: %w", err)
+	}
+
+	var result []domain.ConfluenceScore
+	for _, score := range latestMap {
+		result = append(result, *score)
 	}
 	return result, nil
 }

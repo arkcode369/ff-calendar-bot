@@ -198,14 +198,14 @@ func main() {
 		}
 
 		// Fetch COT data
-		if err := cotAnalyzer.FetchAndAnalyze(initCtx); err != nil {
+		if _, err := cotAnalyzer.AnalyzeAll(initCtx); err != nil {
 			log.Printf("[MAIN] Initial COT fetch failed: %v", err)
 		} else {
 			log.Println("[MAIN] Initial COT data loaded")
 		}
 
 		// Compute surprise indices
-		if err := surpriseCalc.RecalculateAll(initCtx); err != nil {
+		if _, err := surpriseCalc.ComputeAll(initCtx); err != nil {
 			log.Printf("[MAIN] Initial surprise calc failed: %v", err)
 		} else {
 			log.Println("[MAIN] Initial surprise indices computed")
