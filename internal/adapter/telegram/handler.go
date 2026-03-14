@@ -60,6 +60,7 @@ func NewHandler(
 	bot.RegisterCommand("/help", h.cmdHelp)
 	bot.RegisterCommand("/today", h.cmdToday)
 	bot.RegisterCommand("/week", h.cmdWeek)
+	bot.RegisterCommand("/nextweek", h.cmdNextWeek)
 	bot.RegisterCommand("/cot", h.cmdCOT)
 	bot.RegisterCommand("/rank", h.cmdRank)
 	bot.RegisterCommand("/confluence", h.cmdConfluence)
@@ -76,7 +77,7 @@ func NewHandler(
 	bot.RegisterCallback("alert:", h.cbAlertToggle)
 	bot.RegisterCallback("set:", h.cbSettings)
 
-	log.Printf("[HANDLER] Registered 13 commands and 4 callback prefixes")
+	log.Printf("[HANDLER] Registered 14 commands and 4 callback prefixes")
 	return h
 }
 
@@ -92,6 +93,7 @@ Institutional-grade forex fundamental analysis:
 <b>Calendar Commands:</b>
 /today - Today's economic events
 /week - This week's calendar
+/nextweek - Next week's calendar
 
 <b>Analysis Commands:</b>
 /cot - COT positioning analysis
@@ -182,6 +184,44 @@ func (h *Handler) cmdWeek(ctx context.Context, chatID string, userID int64, args
 
 	if len(events) == 0 {
 		_, err = h.bot.SendHTML(ctx, chatID, "No events found for this week.")
+		return err
+	}
+
+	html := h.fmt.FormatWeeklyCalendar(events, start)
+	_, err = h.bot.SendHTML(ctx, chatID, html)
+	return err
+}
+
+// ---------------------------------------------------------------------------
+// /nextweek — Next week's calendar
+// ---------------------------------------------------------------------------
+
+func (h *Handler) cmdNextWeek(ctx context.Context, chatID string, userID int64, args string) error {
+	now := timeutil.NowWIB()
+	// Next week start is 7 days after this week start
+	start := timeutil.StartOfWeek(now).AddDate(0, 0, 7)
+	end := start.AddDate(0, 0, 7)
+
+	var events []domain.FFEvent
+	var err error
+
+	if args != "" {
+		arg := strings.ToUpper(strings.TrimSpace(args))
+		if arg == "HIGH" {
+			events, err = h.eventRepo.GetHighImpactEvents(ctx, start, end)
+		} else {
+			events, err = h.eventRepo.GetEventsByCurrency(ctx, arg, start, end)
+		}
+	} else {
+		events, err = h.eventRepo.GetEventsByDateRange(ctx, start, end)
+	}
+
+	if err != nil {
+		return fmt.Errorf("fetch next week events: %w", err)
+	}
+
+	if len(events) == 0 {
+		_, err = h.bot.SendHTML(ctx, chatID, "No events found for next week yet. Try /refresh to fetch latest data.")
 		return err
 	}
 

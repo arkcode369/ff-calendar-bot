@@ -60,9 +60,14 @@ func NewFallbackScraper(jsonURL string) *FallbackScraper {
 
 // FetchWeeklyJSON fetches this week's calendar data from Fair Economy.
 func (f *FallbackScraper) FetchWeeklyJSON(ctx context.Context) ([]domain.FFEvent, error) {
-	log.Printf("[FALLBACK] Fetching from Fair Economy: %s", f.jsonURL)
+	return f.FetchWeeklyJSONCustomURL(ctx, f.jsonURL)
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.jsonURL, nil)
+// FetchWeeklyJSONCustomURL fetches calendar data from a custom URL.
+func (f *FallbackScraper) FetchWeeklyJSONCustomURL(ctx context.Context, customURL string) ([]domain.FFEvent, error) {
+	log.Printf("[FALLBACK] Fetching from Fair Economy: %s", customURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, customURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

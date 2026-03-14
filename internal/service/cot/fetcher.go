@@ -52,13 +52,17 @@ func (f *Fetcher) FetchLatest(ctx context.Context, contracts []domain.COTContrac
 // FetchHistory retrieves historical COT data for a specific contract.
 // Uses Socrata with $where and $order for efficient server-side filtering.
 func (f *Fetcher) FetchHistory(ctx context.Context, contract domain.COTContract, weeks int) ([]domain.COTRecord, error) {
-	url := fmt.Sprintf("%s?$where=cftc_contract_market_code='%s'&$order=report_date_as_yyyy_mm_dd DESC&$limit=%d",
-		f.socrataURL, contract.Code, weeks)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.socrataURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+
+	q := req.URL.Query()
+	q.Add("$where", fmt.Sprintf("cftc_contract_market_code='%s'", contract.Code))
+	q.Add("$order", "report_date_as_yyyy_mm_dd DESC")
+	q.Add("$limit", fmt.Sprintf("%d", weeks))
+	req.URL.RawQuery = q.Encode()
+
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := f.httpClient.Do(req)
@@ -93,13 +97,17 @@ func (f *Fetcher) fetchFromSocrata(ctx context.Context, contracts []domain.COTCo
 	}
 	where := fmt.Sprintf("cftc_contract_market_code in(%s)", strings.Join(codes, ","))
 
-	url := fmt.Sprintf("%s?$where=%s&$order=report_date_as_yyyy_mm_dd DESC&$limit=%d",
-		f.socrataURL, where, len(contracts)*2) // *2 to get at least 2 weeks per contract
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.socrataURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
+
+	q := req.URL.Query()
+	q.Add("$where", where)
+	q.Add("$order", "report_date_as_yyyy_mm_dd DESC")
+	q.Add("$limit", fmt.Sprintf("%d", len(contracts)*2))
+	req.URL.RawQuery = q.Encode()
+
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := f.httpClient.Do(req)

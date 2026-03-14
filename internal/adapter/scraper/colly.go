@@ -104,35 +104,50 @@ func (s *CollyFFScraper) newCollector() *colly.Collector {
 // ScrapeWeeklyCalendar — Main weekly calendar scrape
 // ---------------------------------------------------------------------------
 
-// ScrapeWeeklyCalendar fetches all events for the current week from ForexFactory.
+// ScrapeWeeklyCalendar fetches all events for the current and next week from ForexFactory.
 // Falls back to Fair Economy JSON API if HTML scraping fails.
 func (s *CollyFFScraper) ScrapeWeeklyCalendar(ctx context.Context) ([]domain.FFEvent, error) {
-	s.mu.Lock()
-	if time.Since(s.lastScrape) < s.minDelay {
-		time.Sleep(s.minDelay - time.Since(s.lastScrape))
-	}
-	s.lastScrape = time.Now()
-	s.mu.Unlock()
+	var allEvents []domain.FFEvent
+	weeks := []string{"this", "next"}
 
-	url := s.baseURL + "/calendar?week=this"
-	log.Printf("[SCRAPER] Scraping weekly calendar: %s", url)
-
-	events, err := s.scrapeCalendarPage(ctx, url)
-	if err != nil {
-		log.Printf("[SCRAPER] HTML scrape failed: %v, trying fallback", err)
-		if s.fallback != nil {
-			return s.fallback.FetchWeeklyJSON(ctx)
+	for _, week := range weeks {
+		s.mu.Lock()
+		if time.Since(s.lastScrape) < s.minDelay {
+			time.Sleep(s.minDelay - time.Since(s.lastScrape))
 		}
-		return nil, fmt.Errorf("scrape failed and no fallback: %w", err)
+		s.lastScrape = time.Now()
+		s.mu.Unlock()
+
+		url := s.baseURL + "/calendar?week=" + week
+		log.Printf("[SCRAPER] Scraping %s week calendar: %s", week, url)
+
+		events, err := s.scrapeCalendarPage(ctx, url)
+		if err != nil || len(events) == 0 {
+			if err != nil {
+				log.Printf("[SCRAPER] HTML scrape failed for %s week: %v, trying fallback", week, err)
+			} else {
+				log.Printf("[SCRAPER] HTML returned 0 events for %s week, trying fallback", week)
+			}
+			
+			if s.fallback != nil {
+				fallbackURL := s.fallback.jsonURL
+				if week == "next" {
+					fallbackURL = strings.Replace(fallbackURL, "thisweek", "nextweek", 1)
+				}
+				fbEvents, fbErr := s.fallback.FetchWeeklyJSONCustomURL(ctx, fallbackURL)
+				if fbErr == nil {
+					events = fbEvents
+				}
+			}
+		}
+
+		if len(events) > 0 {
+			allEvents = append(allEvents, events...)
+		}
 	}
 
-	if len(events) == 0 && s.fallback != nil {
-		log.Printf("[SCRAPER] HTML returned 0 events, trying fallback")
-		return s.fallback.FetchWeeklyJSON(ctx)
-	}
-
-	log.Printf("[SCRAPER] Scraped %d events for this week", len(events))
-	return events, nil
+	log.Printf("[SCRAPER] Scraped %d events total for this and next week", len(allEvents))
+	return allEvents, nil
 }
 
 // scrapeCalendarPage parses the FF weekly calendar HTML table.
@@ -339,14 +354,23 @@ func (s *CollyFFScraper) HealthCheck(ctx context.Context) error {
 	})
 
 	err := c.Visit(s.baseURL)
+	if err == nil && reachable {
+		return nil
+	}
+
+	// If primary fails or 403s, verify fallback is working
+	if s.fallback != nil {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, "https://nfs.faireconomy.media/ff_calendar_thisweek.json", nil)
+		resp, fallbackErr := s.transport.RoundTrip(req)
+		if fallbackErr == nil && resp.StatusCode == http.StatusOK {
+			return nil // Fallback is healthy
+		}
+	}
+
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	if !reachable {
-		return fmt.Errorf("health check: non-200 response")
-	}
-
-	return nil
+	return fmt.Errorf("health check: non-200 response")
 }
 
 // ---------------------------------------------------------------------------

@@ -28,24 +28,24 @@ func NewFormatter() *Formatter {
 func impactIcon(impact domain.ImpactLevel) string {
 	switch impact {
 	case domain.ImpactHigh:
-		return "[!!!]"
+		return "🔴"
 	case domain.ImpactMedium:
-		return "[!!]"
+		return "🟠"
 	case domain.ImpactLow:
-		return "[!]"
+		return "🟡"
 	default:
-		return "[-]"
+		return "⚪️"
 	}
 }
 
 // Direction arrow for numeric values.
 func directionArrow(actual, forecast float64) string {
 	if actual > forecast {
-		return "+"
+		return "🟢"
 	} else if actual < forecast {
-		return "-"
+		return "🔴"
 	}
-	return "="
+	return "⚪️"
 }
 
 // ---------------------------------------------------------------------------
@@ -122,48 +122,60 @@ func (f *Formatter) FormatWeeklyCalendar(events []domain.FFEvent, weekStart time
 
 // formatEventLine formats a single event as one line.
 func (f *Formatter) formatEventLine(e domain.FFEvent) string {
-	var parts []string
+	var b strings.Builder
 
-	// Impact indicator
-	parts = append(parts, impactIcon(e.Impact))
-
-	// Time (if not all-day and not already shown in group header)
+	// Row 1: Impact, Time, Currency, Title
+	timeStr := "All Day"
 	if !e.IsAllDay {
-		parts = append(parts, e.Date.Format("15:04"))
+		timeStr = e.Date.Format("15:04")
 	}
 
-	// Currency + Title
-	parts = append(parts, fmt.Sprintf("<b>%s</b>", e.Currency))
-	parts = append(parts, e.Title)
+	b.WriteString(fmt.Sprintf("%s <code>%-5s</code> <b>%s</b> %s",
+		impactIcon(e.Impact), timeStr, e.Currency, e.Title))
 
-	// Data values
-	if e.HasActual() {
-		parts = append(parts, fmt.Sprintf("A:<b>%s</b>", e.Actual))
+	// Preliminary/Revised/Speaker tag inline with title
+	if e.IsPreliminary {
+		b.WriteString(" <i>(Flash)</i>")
+	} else if e.ReleaseType == domain.ReleaseRevised {
+		b.WriteString(" <i>(Rev)</i>")
 	}
-	if e.HasForecast() {
-		parts = append(parts, fmt.Sprintf("F:%s", e.Forecast))
+	if e.SpeakerName != "" {
+		b.WriteString(fmt.Sprintf(" 🗣[%s]", e.SpeakerName))
 	}
+	b.WriteString("\n")
+
+	// Row 2: Data values (A, F, P)
+	var dataParts []string
+
+	// Actual
+	if e.Actual != "" {
+		dataParts = append(dataParts, fmt.Sprintf("A: <b>%s</b>", e.Actual))
+	} else {
+		dataParts = append(dataParts, "A: <b>---</b>")
+	}
+
+	// Forecast
+	if e.Forecast != "" {
+		dataParts = append(dataParts, fmt.Sprintf("F: %s", e.Forecast))
+	}
+
+	// Previous
 	if e.Previous != "" {
 		prev := e.Previous
 		if e.WasRevised() {
 			prev = fmt.Sprintf("<s>%s</s> %s", e.Revision.OriginalValue, e.Revision.RevisedValue)
 		}
-		parts = append(parts, fmt.Sprintf("P:%s", prev))
+		dataParts = append(dataParts, fmt.Sprintf("P: %s", prev))
 	}
 
-	// Preliminary/Revised tag
-	if e.IsPreliminary {
-		parts = append(parts, "(Flash)")
-	} else if e.ReleaseType == domain.ReleaseRevised {
-		parts = append(parts, "(Rev)")
+	if len(dataParts) > 0 {
+		b.WriteString("    └ <code>")
+		b.WriteString(strings.Join(dataParts, " | "))
+		b.WriteString("</code>\n")
 	}
 
-	// Speaker
-	if e.SpeakerName != "" {
-		parts = append(parts, fmt.Sprintf("[%s]", e.SpeakerName))
-	}
-
-	return strings.Join(parts, " ") + "\n"
+	b.WriteString("\n")
+	return b.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -177,13 +189,13 @@ func (f *Formatter) FormatEventAlert(event domain.FFEvent, minutesBefore int) st
 	// Header with urgency
 	switch {
 	case minutesBefore <= 1:
-		b.WriteString("<b>[IMMINENT]</b> ")
+		b.WriteString("🚨 <b>[IMMINENT]</b> ")
 	case minutesBefore <= 5:
-		b.WriteString("<b>[ALERT]</b> ")
+		b.WriteString("⚠️ <b>[ALERT]</b> ")
 	case minutesBefore <= 15:
-		b.WriteString("<b>[UPCOMING]</b> ")
+		b.WriteString("🔔 <b>[UPCOMING]</b> ")
 	default:
-		b.WriteString("<b>[SCHEDULED]</b> ")
+		b.WriteString("🗓 <b>[SCHEDULED]</b> ")
 	}
 
 	b.WriteString(fmt.Sprintf("%s %s\n", impactIcon(event.Impact), event.Title))
@@ -437,30 +449,20 @@ func (f *Formatter) FormatCurrencyRanking(ranking domain.CurrencyRanking) string
 
 	// Table header
 	b.WriteString("<pre>")
-	b.WriteString(fmt.Sprintf("%-4s %-6s %-5s %-5s %-5s\n",
-		"Rank", "CCY", "Score", "Bias", "Str"))
-	b.WriteString(strings.Repeat("-", 30) + "\n")
+	b.WriteString(fmt.Sprintf("%-4s %-6s %-6s %-5s\n",
+		"Rank", "CCY", "Score", "Bias"))
+	b.WriteString(strings.Repeat("-", 25) + "\n")
 
 	for i, entry := range ranking.Rankings {
-		biasLabel := "--"
+		biasLabel := "⚪️"
 		if entry.Score.CompositeScore > 0.3 {
-			biasLabel = "BUL"
+			biasLabel = "🟢"
 		} else if entry.Score.CompositeScore < -0.3 {
-			biasLabel = "BER"
-		} else {
-			biasLabel = "NEU"
+			biasLabel = "🔴"
 		}
 
-		strength := "Med"
-		abs := math.Abs(entry.Score.CompositeScore)
-		if abs >= 0.7 {
-			strength = "Str"
-		} else if abs < 0.3 {
-			strength = "Wek"
-		}
-
-		b.WriteString(fmt.Sprintf("%-4d %-6s %+.2f  %-5s %-5s\n",
-			i+1, string(entry.Score.Code), entry.Score.CompositeScore, biasLabel, strength))
+		b.WriteString(fmt.Sprintf("%-4d %-6s %+.2f  %-5s\n",
+			i+1, string(entry.Score.Code), entry.Score.CompositeScore, biasLabel))
 	}
 
 	b.WriteString("</pre>")
@@ -469,7 +471,7 @@ func (f *Formatter) FormatCurrencyRanking(ranking domain.CurrencyRanking) string
 	if len(ranking.Rankings) >= 2 {
 		strongest := ranking.Rankings[0]
 		weakest := ranking.Rankings[len(ranking.Rankings)-1]
-		b.WriteString(fmt.Sprintf("\n<b>Top Pair:</b> Long %s / Short %s",
+		b.WriteString(fmt.Sprintf("\n<b>Top Pair:</b> Long <b>%s</b> / Short <b>%s</b>",
 			string(strongest.Score.Code), string(weakest.Score.Code)))
 	}
 
